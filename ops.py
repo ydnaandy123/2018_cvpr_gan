@@ -1,110 +1,56 @@
 import tensorflow as tf
-import tensorflow.contrib.slim as slim
-from tensorflow.contrib.layers import batch_norm
-from tensorflow.contrib.framework import arg_scope
 """
-Combination with default value
+Combinations
 """
 
 
-def relu_batch_conv(input_tensor, filters, is_training, name, k_h=3, k_w=3, d_h=1, d_w=1):
+def lrelu_instance_normalization_conv2d(input_tensor, name):
+    return input_tensor
+"""
+Basic operations
+"""
+
+
+def instance_normalization(input_tensor, name="instance_normalization"):
     with tf.variable_scope(name):
-        x_relu = relu(input_tensor=input_tensor)
-        x_batch = batch_normalization(input_tensor=x_relu, training=is_training, scope='batch')
-        x_conv = conv2d(input_tensor=x_batch, filters=filters, activation=None, name='conv2d',
-                        k_h=k_h, k_w=k_w, d_h=d_h, d_w=d_w)
-    return x_conv
+        depth = input_tensor.get_shape()[3]
+        scale = tf.get_variable("scale", [depth], initializer=tf.random_normal_initializer(1.0, 0.02, dtype=tf.float32))
+        offset = tf.get_variable("offset", [depth], initializer=tf.constant_initializer(0.0))
+        mean, variance = tf.nn.moments(input_tensor, axes=[1, 2], keep_dims=True)
+        epsilon = 1e-5
+        inv = tf.rsqrt(variance + epsilon)
+        normalized = (input_tensor-mean)*inv
+        return scale*normalized + offset
 
 
-def pool2d_relu_batch_conv(input_tensor, filters, is_training, name, k_h=3, k_w=3, d_h=1, d_w=1):
+def conv2d(input_tensor, output_dim, ks=4, s=2, stddev=0.02, padding='SAME', name="conv2d"):
     with tf.variable_scope(name):
-        x_pool = max_pooling(input_tensor=input_tensor)
-        x_relu = relu(input_tensor=x_pool)
-        x_batch = batch_normalization(input_tensor=x_relu, training=is_training, name='batch')
-        x_conv = conv2d(input_tensor=x_batch, filters=filters, activation=None, name='conv2d',
-                        k_h=k_h, k_w=k_w, d_h=d_h, d_w=d_w)
-    return x_conv
-"""
-Convolution
-"""
+        # return slim.conv2d(input_tensor, output_dim, ks, s, padding=padding, biases_initializer=None,
+        #                    activation_fn=None, weights_initializer=tf.truncated_normal_initializer(stddev=stddev))
+        return tf.layers.conv2d(input_tensor, output_dim, ks, s, padding=padding, bias_initializer=None,
+                                activation=None, kernel_initializer=tf.truncated_normal_initializer(stddev=stddev))
 
 
-def conv2d(input_, output_dim, ks=4, s=2, stddev=0.02, padding='SAME', name="conv2d"):
+def deconv2d(input_tensor, output_dim, ks=4, s=2, stddev=0.02, name="deconv2d"):
     with tf.variable_scope(name):
-        return slim.conv2d(input_, output_dim, ks, s, padding=padding, activation_fn=None,
-                            weights_initializer=tf.truncated_normal_initializer(stddev=stddev),
-                            biases_initializer=None)
-
-def conv2d(input_tensor, filters, k_h=3, k_w=3, d_h=1, d_w=1, activation=None, name="conv2d"):
-    conv = tf.layers.conv2d(inputs=input_tensor, filters=filters, kernel_size=[k_h, k_w],
-                            kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                            strides=[d_h, d_w], padding='same', activation=activation, name=name)
-    return conv
+        # return slim.conv2d_transpose(input_tensor, output_dim, ks, s, padding='SAME', activation_fn=None,
+        #                              weights_initializer=tf.truncated_normal_initializer(stddev=stddev),
+        #                              biases_initializer=None)
+        return tf.layers.conv2d_transpose(input_tensor, output_dim, ks, s, padding='SAME', activation=None,
+                                          kernel_initializer=tf.truncated_normal_initializer(stddev=stddev),
+                                          bias_initializer=None)
 
 
-def relu(input_tensor):
-    return tf.nn.relu(features=input_tensor)
-"""
-Generalize
-"""
+def lrelu(x, leak=0.2, name='lrelu'):
+    return tf.maximum(x, leak*x, name=name)
 
 
-def batch_normalization(input_tensor, training, scope):
-    with arg_scope([batch_norm],
-                   scope=scope,
-                   updates_collections=None,
-                   decay=0.9,
-                   center=True,
-                   scale=True,
-                   zero_debias_moving_mean=True):
-        return tf.cond(training,
-                       lambda: batch_norm(inputs=input_tensor, is_training=training, reuse=None),
-                       lambda: batch_norm(inputs=input_tensor, is_training=training, reuse=True))
-
-    # batch = tf.layers.batch_normalization(inputs=input_tensor, training=training, name=name)
-    # return batch
-
-
-def drop_out(input_tensor, rate, training):
-    return tf.layers.dropout(inputs=input_tensor, rate=rate, training=training)
-"""
-Pooling
-"""
-
-
-def average_pooling(input_tensor, pool_size_h=2, pool_size_w=2, stride_h=2, stride_w=2, padding='VALID'):
-    return tf.layers.average_pooling2d(
-        inputs=input_tensor, pool_size=[pool_size_h, pool_size_w], strides=[stride_h, stride_w], padding=padding)
-
-
-def max_pooling(input_tensor, pool_size_h=2, pool_size_w=2, stride_h=2, stride_w=2, padding='VALID'):
-    return tf.layers.max_pooling2d(
-        inputs=input_tensor, pool_size=[pool_size_h, pool_size_w], strides=[stride_h, stride_w], padding=padding)
-
-
-def global_average_pooling(input_tensor):
-    return tf.reduce_mean(input_tensor=input_tensor, axis=[1, 2], keep_dims=True)
-"""
-Others
-"""
-
-
-def concatenation(layers):
-    return tf.concat(layers, axis=3)
-
-
-def flatten(input_tensor):
-    dim = tf.reduce_prod(tf.shape(input_tensor)[1:])
-    return tf.reshape(input_tensor, [-1, dim])
-
-
-def linear(x, units):
-    return tf.layers.dense(inputs=x, units=units, name='linear')
-
-
-def get_shape(tensor):
-    static_shape = tensor.shape.as_list()
-    dynamic_shape = tf.unstack(tf.shape(tensor))
-    dims = [s[1] if s[0] is None else s[0]
-            for s in zip(static_shape, dynamic_shape)]
-    return dims
+def linear(input_tensor, output_size, name=None, stddev=0.02, bias_start=0.0, with_w=False):
+    with tf.variable_scope(name or "Linear"):
+        matrix = tf.get_variable("Matrix", [input_tensor.get_shape()[-1], output_size], tf.float32,
+                                 tf.random_normal_initializer(stddev=stddev))
+        bias = tf.get_variable("bias", [output_size], initializer=tf.constant_initializer(bias_start))
+        if with_w:
+            return tf.matmul(input_tensor, matrix) + bias, matrix, bias
+        else:
+            return tf.matmul(input_tensor, matrix) + bias
