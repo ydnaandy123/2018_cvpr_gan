@@ -186,7 +186,7 @@ def main(args=None):
     """
     tfconfig = tf.ConfigProto(allow_soft_placement=True)
     tfconfig.gpu_options.allow_growth = True
-    with tf.Session(config=tfconfig) as sess:
+    with tf.Session() as sess:
         with tf.variable_scope('Initial'):
             ckpt = tf.train.get_checkpoint_state(dataset_parser.checkpoint_dir)
             if ckpt and ckpt.model_checkpoint_path:
