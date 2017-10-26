@@ -11,6 +11,16 @@ Basic operations
 """
 
 
+def residule_block(x, dim, ks=3, s=1, name='res'):
+    with tf.variable_scope(name):
+        p = int((ks - 1) / 2)
+        y = tf.pad(x, [[0, 0], [p, p], [p, p], [0, 0]], "REFLECT")
+        y = instance_normalization(conv2d(y, dim, ks, s, padding='VALID', name='_c1'), name='_bn1')
+        y = tf.pad(tf.nn.relu(y), [[0, 0], [p, p], [p, p], [0, 0]], "REFLECT")
+        y = instance_normalization(conv2d(y, dim, ks, s, padding='VALID', name='_c2'), name='_bn2')
+    return y + x
+
+
 def instance_normalization(input_tensor, name="instance_normalization"):
     with tf.variable_scope(name):
         depth = input_tensor.get_shape()[3]
@@ -54,3 +64,15 @@ def linear(input_tensor, output_size, name=None, stddev=0.02, bias_start=0.0, wi
             return tf.matmul(input_tensor, matrix) + bias, matrix, bias
         else:
             return tf.matmul(input_tensor, matrix) + bias
+
+
+def train_op(loss, flags, var_list, name):
+    with tf.variable_scope(name):
+        optimizer = tf.train.AdamOptimizer(flags.learning_rate, flags.beta1, flags.beta2, name='optimizer')
+        grads = optimizer.compute_gradients(loss, var_list=var_list)
+        # TODO: DEBUG
+        if flags.debug:
+            for grad, var in grads:
+                if grad is not None:
+                    tf.summary.histogram(var.op.name + "/gradient", grad)
+        return optimizer.apply_gradients(grads, name='train_op')

@@ -76,16 +76,6 @@ def generator_unet(image, flags, reuse, drop_probability, name):
         return tf.nn.tanh(d8)
 
 
-def residule_block(x, dim, ks=3, s=1, name='res'):
-    with tf.variable_scope(name):
-        p = int((ks - 1) / 2)
-        y = tf.pad(x, [[0, 0], [p, p], [p, p], [0, 0]], "REFLECT")
-        y = instance_normalization(conv2d(y, dim, ks, s, padding='VALID', name='_c1'), name='_bn1')
-        y = tf.pad(tf.nn.relu(y), [[0, 0], [p, p], [p, p], [0, 0]], "REFLECT")
-        y = instance_normalization(conv2d(y, dim, ks, s, padding='VALID', name='_c2'), name='_bn2')
-    return y + x
-
-
 def generator_resnet(image, options, reuse, name):
     with tf.variable_scope(name):
         # image is 256 x 256 x input_c_dim
@@ -144,31 +134,3 @@ def discriminator(image, flags, reuse, name):
         h4 = conv2d(h3, 1, s=1, name='d_h3_pred')
         # h4 is (32 x 32 x 1)
         return h4
-
-
-def g_loss(dis_fake, flags, real_a, recon_a, real_b, recon_b, name):
-    with tf.variable_scope(name):
-        adversarial_loss = mae_criterion(dis_fake, tf.ones_like(dis_fake), name='adversarial')
-        with tf.variable_scope('cycle'):
-            cycle = flags.lambda_rec * (abs_criterion(real_a, recon_a) + abs_criterion(real_b, recon_b))
-        return adversarial_loss + cycle
-
-
-def d_loss(dis_real, dis_fake_pool, name):
-    with tf.variable_scope(name):
-        d_loss_real = mae_criterion(dis_real, tf.ones_like(dis_real), name='adversarial_real')
-        d_loss_fake = mae_criterion(dis_fake_pool, tf.zeros_like(dis_fake_pool), name='adversarial_fake_pool')
-        return d_loss_real + d_loss_fake
-
-
-def train_op(loss, learning_rate, flags, var_list, name):
-    with tf.variable_scope(name):
-        optimizer = tf.train.AdamOptimizer(learning_rate, flags.beta1, flags.beta2, name='optimizer')
-        grads = optimizer.compute_gradients(loss, var_list=var_list)
-        '''
-        if FLAGS.debug:
-            # print(len(var_list))
-            for grad, var in grads:
-                utils.add_gradient_summary(grad, var)
-        '''
-        return optimizer.apply_gradients(grads, name='train_op')

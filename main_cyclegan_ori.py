@@ -23,7 +23,7 @@ tf.flags.DEFINE_integer("num_epochs", 200, "number of epochs for training")
 tf.flags.DEFINE_integer("num_epochs_decay", 100, "number of epochs to decay learning rate")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/horse2zebra", "directory of the dataset")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/ori2hlt", "directory of the dataset")
 tf.flags.DEFINE_integer('save_freq', 1000, "save a model every save_freq iterations")
 tf.flags.DEFINE_integer('log_freq', 10, "log a model every log_freq iterations")
 tf.flags.DEFINE_integer('observe_freq', 100, "observe training image every observe_freq iterations")
@@ -45,8 +45,8 @@ def main(args=None):
     """
     if False:
         dataset_parser.load_paths(is_jpg=True, load_val=True)
-        dataset_parser.data2record(name='horse_train.tfrecords', set_type='train', test_num=None)
-        dataset_parser.data2record(name='horse_val.tfrecords', set_type='val', test_num=None)
+        dataset_parser.data2record(name='hlt_train.tfrecords', set_type='train', test_num=None)
+        dataset_parser.data2record(name='hlt_val.tfrecords', set_type='val', test_num=None)
         # coco_parser.data2record_test(name='coco_stuff2017_test-dev_all_label.tfrecords', is_dev=True, test_num=None)
         # coco_parser.data2record_test(name='coco_stuff2017_test_all_label.tfrecords', is_dev=False, test_num=None)
         return
@@ -90,10 +90,10 @@ def main(args=None):
     with tf.variable_scope('Network'):
         # Input
         global_step = tf.Variable(0, trainable=False, name='global_step')
-        learning_rate = tf.placeholder(tf.float32, name="learning_rate")
+        # learning_rate = tf.placeholder(tf.float32, name="learning_rate")
         # TODO batch normalization
         # TODO is_training no used
-        is_training = tf.placeholder(tf.bool, name="is_training")
+        # is_training = tf.placeholder(tf.bool, name="is_training")
         # drop_probability = tf.placeholder(tf.float32, name="drop_probability")
         # real_a = tf.placeholder(tf.float32, shape=[None, None, None, 3], name="real_a")
         # real_b = tf.placeholder(tf.float32, shape=[None, None, None, 3], name="real_b")
@@ -145,11 +145,13 @@ def main(args=None):
         trainable_var_dis_a = tf.get_collection(
             key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Network/Discriminator_A')
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        # TODO: adam need learning rate?
+        # TODO: observe gradients
         with tf.control_dependencies(update_ops):
-            train_op_gen_a2b = train_op(loss_gen_a2b, learning_rate, flags, trainable_var_gen_a2b, name='gen_a2b')
-            train_op_dis_b = train_op(loss_dis_b, learning_rate, flags, trainable_var_dis_b, name='dis_b')
-            train_op_gen_b2a = train_op(loss_gen_b2a, learning_rate, flags, trainable_var_gen_b2a, name='gen_b2a')
-            train_op_dis_a = train_op(loss_dis_a, learning_rate, flags, trainable_var_dis_a, name='dis_a')
+            train_op_gen_a2b = train_op(loss_gen_a2b, flags, trainable_var_gen_a2b, name='gen_a2b')
+            train_op_dis_b = train_op(loss_dis_b, flags, trainable_var_dis_b, name='dis_b')
+            train_op_gen_b2a = train_op(loss_gen_b2a, flags, trainable_var_gen_b2a, name='gen_b2a')
+            train_op_dis_a = train_op(loss_dis_a, flags, trainable_var_dis_a, name='dis_a')
 
     saver = tf.train.Saver(max_to_keep=2)
     # Graph Logs
@@ -169,8 +171,8 @@ def main(args=None):
         ], name='dis_b')
     with tf.variable_scope('GEN_b2a'):
         summary_op_loss_gen_b2a = tf.summary.merge([
-            tf.summary.scalar("loss/gen/b2a/all", loss_gen_b2a),
-            tf.summary.scalar("loss/gen/b2a/adv", loss_gen_b2a_adv),
+            tf.summary.scalar("loss/gen_b2a/all", loss_gen_b2a),
+            tf.summary.scalar("loss/gen_b2a/adv", loss_gen_b2a_adv),
             tf.summary.scalar("loss/gen/cycle/all", loss_gen_cycle),
             tf.summary.scalar("loss/gen/cycle/recon_a", loss_gen_recon_a),
             tf.summary.scalar("loss/gen/cycle/recon_b", loss_gen_recon_b),
@@ -181,6 +183,7 @@ def main(args=None):
             tf.summary.scalar("loss/dis_a/adv_real", loss_dis_a_adv_real),
             tf.summary.scalar("loss/dis_a/adv_fake", loss_dis_a_adv_fake),
         ], name='dis_a')
+    summary_op = tf.summary.merge_all()
     """
     Session
     """
@@ -215,13 +218,13 @@ def main(args=None):
                 sess.run([training_a_iterator.initializer, training_b_iterator.initializer])
                 learning_rate_sess = flags.learning_rate if epoch < flags.num_epochs_decay\
                     else flags.learning_rate*(flags.num_epochs-epoch)/(flags.num_epochs-flags.num_epochs_decay)
-                feed_dict_train = {is_training: True, learning_rate: learning_rate_sess,
-                                   handle_a: training_a_handle, handle_b: training_b_handle}
+                feed_dict_train = {handle_a: training_a_handle, handle_b: training_b_handle}
                 # feed_dict_valid = {is_training: False}
                 while True:
                     try:
                         print('epoch:[{:d}/{:d}], global step:{:d}, learning rate:{:f}, time:{:4.4f}'.format(
                             epoch, flags.num_epochs, global_step_sess, learning_rate_sess, time.time() - start_time))
+                        '''
                         # Update gen_A2B
                         _, fake_b_sess, summary_op_loss_gen_a2b_sess = \
                             sess.run([train_op_gen_a2b, fake_b, summary_op_loss_gen_a2b], feed_dict=feed_dict_train)
@@ -229,8 +232,7 @@ def main(args=None):
                         fake_b_pool_query = image_pool_b.query(fake_b_sess)
                         _, summary_op_loss_dis_b_sess = \
                             sess.run([train_op_dis_b, summary_op_loss_dis_b],
-                                     feed_dict={is_training: True, learning_rate: learning_rate_sess,
-                                                fake_b_pool: fake_b_pool_query, handle_b: training_b_handle})
+                                     feed_dict={fake_b_pool: fake_b_pool_query, handle_b: training_b_handle})
                         # Update gen_B2A
                         _, fake_a_sess, summary_op_loss_gen_b2a_sess = \
                             sess.run([train_op_gen_b2a, fake_a, summary_op_loss_gen_b2a], feed_dict=feed_dict_train)
@@ -238,8 +240,20 @@ def main(args=None):
                         fake_a_pool_query = image_pool_a.query(fake_a_sess)
                         _, summary_op_loss_dis_a_sess = \
                             sess.run([train_op_dis_a, summary_op_loss_dis_a],
-                                     feed_dict={is_training: True, learning_rate: learning_rate_sess,
-                                                fake_a_pool: fake_a_pool_query, handle_a: training_a_handle})
+                                     feed_dict={fake_a_pool: fake_a_pool_query, handle_a: training_a_handle})
+                        '''
+                        # Update gen_A2B
+                        _, fake_b_sess = sess.run([train_op_gen_a2b, fake_b], feed_dict=feed_dict_train)
+                        # Update dis_B
+                        fake_b_pool_query = image_pool_b.query(fake_b_sess)
+                        _ = sess.run(train_op_dis_b,
+                                     feed_dict={fake_b_pool: fake_b_pool_query, handle_b: training_b_handle})
+                        # Update gen_B2A
+                        _, fake_a_sess = sess.run([train_op_gen_b2a, fake_a], feed_dict=feed_dict_train)
+                        # Update dis_A
+                        fake_a_pool_query = image_pool_a.query(fake_a_sess)
+                        _, = sess.run(train_op_dis_a,
+                                      feed_dict={fake_a_pool: fake_a_pool_query, handle_a: training_a_handle})
 
                         global_step_sess += 1
                         sess.run(tf.assign(global_step, global_step_sess))
@@ -247,10 +261,16 @@ def main(args=None):
                         # Logging the events
                         if global_step_sess % flags.log_freq == 1:
                             print('Logging the events')
+                            summary_op_sess = sess.run(summary_op, feed_dict={
+                                handle_a: training_a_handle, handle_b: training_b_handle,
+                                fake_a_pool: fake_a_pool_query, fake_b_pool: fake_b_pool_query})
+                            '''
                             summary_writer.add_summary(summary_op_loss_gen_a2b_sess, global_step_sess)
                             summary_writer.add_summary(summary_op_loss_dis_b_sess, global_step_sess)
                             summary_writer.add_summary(summary_op_loss_gen_b2a_sess, global_step_sess)
                             summary_writer.add_summary(summary_op_loss_dis_a_sess, global_step_sess)
+                            '''
+                            summary_writer.add_summary(summary_op_sess, global_step_sess)
 
                         # Observe training situation (For debugging.)
                         if flags.debug and global_step_sess % flags.observe_freq == 1:
