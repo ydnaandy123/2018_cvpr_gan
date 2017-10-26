@@ -66,13 +66,14 @@ def linear(input_tensor, output_size, name=None, stddev=0.02, bias_start=0.0, wi
             return tf.matmul(input_tensor, matrix) + bias
 
 
-def train_op(loss, flags, var_list, name):
+def train_op(loss, learning_rate, flags, var_list, name):
     with tf.variable_scope(name):
-        optimizer = tf.train.AdamOptimizer(flags.learning_rate, flags.beta1, flags.beta2, name='optimizer')
+        optimizer = tf.train.AdamOptimizer(learning_rate, flags.beta1, flags.beta2, name='optimizer')
         grads = optimizer.compute_gradients(loss, var_list=var_list)
-        # TODO: DEBUG
+        '''
         if flags.debug:
             for grad, var in grads:
                 if grad is not None:
                     tf.summary.histogram(var.op.name + "/gradient", grad)
+        '''
         return optimizer.apply_gradients(grads, name='train_op')

@@ -36,6 +36,7 @@ class CycleParser(object):
     def __init__(self, dataset_dir, flags):
         self.image_height, self.image_width = flags.image_height, flags.image_width
         self.dataset_dir = dataset_dir
+        self.dataset_name = dataset_dir.split('/')[-1]
 
         self.images_trainA_dir = os.path.join(self.dataset_dir, 'trainA')
         self.images_trainB_dir = os.path.join(self.dataset_dir, 'trainB')
