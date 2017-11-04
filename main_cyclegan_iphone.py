@@ -23,7 +23,7 @@ tf.flags.DEFINE_integer("num_epochs", 200, "number of epochs for training")
 tf.flags.DEFINE_integer("num_epochs_decay", 100, "number of epochs to decay learning rate")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/ori2hlt", "directory of the dataset")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/iphone2dslr", "directory of the dataset")
 tf.flags.DEFINE_integer('save_freq', 1000, "save a model every save_freq iterations")
 tf.flags.DEFINE_integer('log_freq', 10, "log a model every log_freq iterations")
 tf.flags.DEFINE_integer('observe_freq', 400, "observe training image every observe_freq iterations")
@@ -142,7 +142,6 @@ def main(args=None):
         trainable_var_dis_a = tf.get_collection(
             key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Network/Discriminator_A')
         # TODO: adam need learning rate?
-        # TODO: gradient DEBUG?
         train_op_gen_a2b = train_op(loss_gen_a2b, learning_rate, flags, trainable_var_gen_a2b, name='gen_a2b')
         train_op_dis_b = train_op(loss_dis_b, learning_rate, flags, trainable_var_dis_b, name='dis_b')
         train_op_gen_b2a = train_op(loss_gen_b2a, learning_rate, flags, trainable_var_gen_b2a, name='gen_b2a')

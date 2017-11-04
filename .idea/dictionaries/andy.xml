@@ -1,13 +1,17 @@
 <component name="ProjectDictionaryState">
   <dictionary name="andy">
     <words>
+      <w>flickr</w>
+      <w>interestingness</w>
       <w>lrelu</w>
       <w>optim</w>
+      <w>pretrained</w>
       <w>residule</w>
       <w>resnet</w>
       <w>tfconfig</w>
       <w>unet</w>
       <w>wgan</w>
+      <w>wgangp</w>
     </words>
   </dictionary>
 </component>
