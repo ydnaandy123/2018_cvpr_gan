@@ -4,6 +4,10 @@ from module import *
 import time
 
 flags = tf.flags.FLAGS
+tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/dof2black_flower", "directory of the dataset")
+tf.flags.DEFINE_integer("data_size", 3200, "data size for training")
+
 tf.flags.DEFINE_integer("image_height", 256, "image target height")
 tf.flags.DEFINE_integer("image_width", 256, "image target width")
 tf.flags.DEFINE_integer("c_in_dim", 3, "input image color channel")
@@ -14,15 +18,12 @@ tf.flags.DEFINE_integer("df_dim", 64, "# of dis filters in first conv layer")
 tf.flags.DEFINE_integer("batch_size", 1, "batch size for training")
 tf.flags.DEFINE_integer("pool_size", 50, "max size for image pooling")
 tf.flags.DEFINE_integer("num_epochs", 40, "number of epochs for training")
-tf.flags.DEFINE_integer("data_size", 4360, "data size for training")
 tf.flags.DEFINE_float("learning_rate", 0.0002, "Learning rate for Adam Optimizer")
 tf.flags.DEFINE_float("beta1", 0.0, "Momentum term of adam [0.5]")
 tf.flags.DEFINE_float("beta2", 0.9, "Momentum term of adam [0.9999]")
 tf.flags.DEFINE_float("lambda_gp", 10.0, "Gradient penalty lambda hyper parameter [10.0]")
 
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
-tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/ori2flower", "directory of the dataset")
 tf.flags.DEFINE_integer('save_freq', 1000, "save a model every save_freq iterations")
 tf.flags.DEFINE_integer('log_freq', 40, "log a model every log_freq iterations")
 tf.flags.DEFINE_integer('observe_freq', 400, "observe training image every observe_freq iterations")
@@ -38,7 +39,7 @@ def main(args=None):
     """
     flags.network_name = args[0].split('/')[-1].split('.')[0].split('main_')[-1]
     flags.logs_dir = './logs_' + flags.network_name
-    dataset_parser = GANParser(dataset_dir=flags.dataset_dir, flags=flags)
+    dataset_parser = GANParser(flags=flags)
     """
     Transform data to TFRecord format (Only do once.)     
     """
@@ -101,12 +102,13 @@ def main(args=None):
                                          dtype=tf.int32, name='image_linear_shape')
         real_a_test = tf.placeholder(tf.float32, shape=[None, flags.image_height, flags.image_width, flags.c_in_dim],
                                      name='real_a_test')
+
         # A -> B
         adjusted_a = tf.zeros_like(real_a, tf.float32, name='mask', optimize=True)
         # adjusted_a = high_light(real_a, name='high_light')
         # adjusted_a = gaussian_blur(real_a, name='gaussian_blur')
-        segment_a = generator_resnet_sigmoid_skip(real_a, flags, False, name="Generator_A2B")
-        segment_a_test = generator_resnet_sigmoid_skip(real_a_test, flags, True, name="Generator_A2B")
+        segment_a = generator_combine(real_a, flags, False, name="Generator_A2B")
+        segment_a_test = generator_combine(real_a_test, flags, True, name="Generator_A2B")
         with tf.variable_scope('Fake_B'):
             foreground = tf.multiply(real_a, segment_a, name='foreground')
             background = tf.multiply(adjusted_a, (1 - segment_a), name='background')
@@ -116,11 +118,11 @@ def main(args=None):
         fake_b_f = tf.reshape(fake_b, [-1, image_linear_shape], name='fake_b_f')
         fake_b_pool_f = tf.reshape(fake_b_pool, [-1, image_linear_shape], name='fake_b_pool_f')
         real_b_f = tf.reshape(real_b, [-1, image_linear_shape], name='real_b_f')
-        dis_fake_b = discriminator_se_wgangp(fake_b_f, flags, reuse=False, name="Discriminator_B")
-        dis_fake_b_pool = discriminator_se_wgangp(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
-        dis_real_b = discriminator_se_wgangp(real_b_f, flags, reuse=True, name="Discriminator_B")
+        dis_fake_b = discriminator_rule(fake_b_f, flags, reuse=False, name="Discriminator_B")
+        dis_fake_b_pool = discriminator_rule(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
+        dis_real_b = discriminator_rule(real_b_f, flags, reuse=True, name="Discriminator_B")
 
-        # WGAN
+        # WGAN Loss
         with tf.name_scope('loss_gen_a2b'):
             loss_gen_a2b = -tf.reduce_mean(dis_fake_b)
 
@@ -133,7 +135,7 @@ def main(args=None):
                 differences = fake_b_pool_f - real_b_f
                 interpolates = real_b_f + (alpha * differences)
                 gradients = tf.gradients(
-                    discriminator_se_wgangp(interpolates, flags, reuse=True, name="Discriminator_B"),
+                    discriminator_rule(interpolates, flags, reuse=True, name="Discriminator_B"),
                     [interpolates])[0]
                 slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
                 gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2)
@@ -240,6 +242,33 @@ def main(args=None):
                     except tf.errors.OutOfRangeError:
                         print('----------------One epochs finished!----------------')
                         break
+        elif flags.mode == 'test':
+            from glob import glob
+            from PIL import Image
+            import os
+            dataset_dir = './dataset/msra4000'
+            data = []
+            for folder in os.listdir(dataset_dir):
+                path = os.path.join(dataset_dir, folder, "*.jpg")
+                data.extend(glob(path))
+            data_len = len(data)
+            for img_idx, img_path in enumerate(data):
+                print('[{:d}/{:d}]'.format(img_idx, data_len))
+                img_name = img_path.split('/')[-1].split('.jpg')[0]
+                test_img = Image.open(img_path)
+                test_img_size = test_img.size
+                test_img = test_img.resize((flags.image_height, flags.image_width), Image.BILINEAR)
+                x = np.array(test_img)
+                if len(x.shape) < 3:
+                    x = np.dstack((x, x, x))
+                x = np.expand_dims(x, axis=0)
+                segment_a_test_sess = sess.run(
+                    segment_a_test, feed_dict={real_a_test: x})
+                segment_a_test_sess = np.array(segment_a_test_sess) * 255
+                x_png = Image.fromarray(np.squeeze(segment_a_test_sess).astype(np.uint8))
+                x_png = x_png.resize(test_img_size, Image.BILINEAR)
+                x_png.save('{}/{}.png'.format(dataset_parser.logs_image_val_dir, img_name), format='PNG')
+
 
 if __name__ == "__main__":
     tf.app.run()

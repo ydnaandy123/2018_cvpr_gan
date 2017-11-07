@@ -1,7 +1,38 @@
 import tensorflow as tf
+
+
+def train_op(loss, learning_rate, flags, var_list, name):
+    with tf.variable_scope(name):
+        optimizer = tf.train.AdamOptimizer(learning_rate, flags.beta1, flags.beta2, name='optimizer')
+        grads = optimizer.compute_gradients(loss, var_list=var_list)
+        '''
+        if flags.debug:
+            for grad, var in grads:
+                if grad is not None:
+                    tf.summary.histogram(var.op.name + "/gradient", grad)
+        '''
+        return optimizer.apply_gradients(grads, name='train_op')
 """
 Combinations
 """
+
+
+def z_up(input_tensor, scale_size, y, dim, name):
+    with tf.variable_scope(name):
+        up = tf.image.resize_bilinear(input_tensor, (scale_size, scale_size), name='up_scale')
+        skip = instance_normalization_relu_conv2d(y, dim*2, ks=1, s=1, padding='SAME', name='skip')
+        fuse = tf.add(up, skip, name='fuse')
+        conv = instance_normalization_relu_conv2d(fuse, dim, ks=3, s=1, padding='SAME', name='conv')
+        return conv
+
+
+def deconv_skip_fuse(input_tensor, y, dim, name):
+    with tf.variable_scope(name):
+        deconv = instance_normalization_relu_deconv2d(input_tensor, dim, 3, 2, name='deconv')
+        skip = instance_normalization_relu_conv2d(y, dim, ks=1, s=1, padding='SAME', name='skip')
+        fuse = tf.add(deconv, skip, name='sum')
+        conv = instance_normalization_relu_conv2d(fuse, dim, ks=3, s=1, padding='SAME', name='conv')
+        return conv
 
 
 def data_up(input_tensor, y, dim, name):
@@ -158,6 +189,16 @@ def skip_squeeze_excitation_layer(x, dim, name):
         return scale
 
 
+def skip_combine(x, y, dim, name):
+    with tf.variable_scope(name):
+        x_conv = instance_normalization_relu_deconv2d(x, dim, 3, 2, name='x_conv')
+        y_skip = instance_normalization_relu_conv2d(y, dim, ks=1, s=1, padding='SAME', name='y_skip')
+        y_residual = residule_block_rule(y_skip, dim=dim, name='y_residual')
+        y_scale = squeeze_excitation_layer(y_residual, ratio=16, name='y_scale')
+        fuse = tf.add(x_conv, y_scale, name='fuse')
+        return fuse
+
+
 def skip_zero(x, dim, name):
     with tf.variable_scope(name):
         skip = instance_normalization_relu_conv2d(x, dim, ks=3, s=1, padding='SAME', name='skip')
@@ -170,7 +211,6 @@ def skip_concat(x, y, dim, name):
         skip = skip_zero(x, dim=dim, name='skip')
         concat = tf.concat([y, skip], axis=3, name='concat')
         return concat
-
 
 
 def squeeze_excitation_layer(x, ratio, name):
