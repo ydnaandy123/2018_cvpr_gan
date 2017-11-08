@@ -311,15 +311,15 @@ def discriminator_wgangp(image, flags, reuse, name):
         # 128x128,
         n1 = conv2d(image_normalization, flags.df_dim, ks=4, s=2, padding='SAME', name='n1')
         # 64x64,
-        n2 = lrelu_instance_normalization_conv2d(n1, flags.df_dim * 2, ks=4, s=2, padding='SAME', name='n2')
+        n2 = lrelu_conv2d(n1, flags.df_dim * 2, ks=4, s=2, padding='SAME', name='n2')
         # 32x32,
-        n3 = lrelu_instance_normalization_conv2d(n2, flags.df_dim * 4, ks=4, s=2, padding='SAME', name='n3')
+        n3 = instance_normalization_lrelu_conv2d(n2, flags.df_dim * 4, ks=4, s=2, padding='SAME', name='n3')
         # 16x16,
-        n4 = lrelu_instance_normalization_conv2d(n3, flags.df_dim * 8, ks=4, s=2, padding='SAME', name='n4')
+        n4 = instance_normalization_lrelu_conv2d(n3, flags.df_dim * 8, ks=4, s=2, padding='SAME', name='n4')
         # 8x8
-        n5 = lrelu_instance_normalization_conv2d(n4, flags.df_dim * 16, ks=4, s=2, padding='SAME', name='n5')
+        n5 = instance_normalization_lrelu_conv2d(n4, flags.df_dim * 16, ks=4, s=2, padding='SAME', name='n5')
         # 1x1
-        s1 = lrelu_instance_normalization_conv2d(n5, 1, ks=7, s=1, padding='VALID', name='s1')
+        s1 = instance_normalization_lrelu_conv2d(n5, 1, ks=7, s=1, padding='VALID', name='s1')
 
         return s1
 
@@ -525,7 +525,8 @@ def generator_resnet(image, options, reuse, name):
         d2 = deconv2d(d1, options.gf_dim, 3, 2, name='g_d2_dc')
         d2 = tf.nn.relu(instance_normalization(d2, 'g_d2_bn'))
         d2 = tf.pad(d2, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
-        pred = tf.nn.tanh(conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c'))
+        # pred = tf.nn.tanh(conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c'))
+        pred = conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c')
 
         return pred
 
@@ -605,9 +606,9 @@ def generator_resnet_sigmoid(image, options, reuse, name):
         d2 = tf.nn.relu(instance_normalization(d2, 'g_d2_bn'))
 
         d2 = tf.pad(d2, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
-        pred = tf.nn.sigmoid(conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c'))
+        logits = conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c')
 
-        return pred
+        return logits
 
 
 def generator_resnet_u(image, options, reuse, name):
@@ -954,19 +955,71 @@ def generator_zero(image, flags, reuse, name):
         r9 = residule_block_zero(r8, flags.gf_dim * 4, name='r9')
 
         d2 = instance_normalization_relu_deconv2d(r9, flags.gf_dim * 2, 3, 2, name='d2')
-        # 128x128
-        d2_concat = skip_concat(c2, d2, dim=flags.gf_dim * 2, name='d2_concat')
-
-        d1 = instance_normalization_relu_deconv2d(d2_concat, flags.gf_dim * 2, 3, 2, name='d1')
-        # 256x256
-        d1_concat = skip_concat(c1, d1, dim=flags.gf_dim, name='d1_concat')
+        d1 = instance_normalization_relu_deconv2d(d2, flags.gf_dim, 3, 2, name='d1')
 
         # Pred
-        pred_s2 = pred_output(r9, flags.c_out_dim, 3, 1, ps=1, name='pred_s2', flags=flags)
-        pred_s1 = pred_output(d2_concat, flags.c_out_dim, 3, 1, ps=1, name='pred_s1', flags=flags)
-        pred_s0 = pred_output(d1_concat, flags.c_out_dim, 7, 1, ps=3, name='pred_s0')
+        logits = relu_reflect_pad_conv(d1, flags.c_out_dim, 7, 1, 3, 'VALID', name='logits')
 
-        return pred_s0, pred_s1, pred_s2
+        return logits
+
+
+def generator_why(image, flags, reuse, name):
+    with tf.variable_scope(name, reuse=reuse):
+        # image is 256 x 256 x input_c_dim
+        image_normalization = image_normalization_one(image, name='image_normalization_one')
+
+        # Justin Johnson's model from https://github.com/jcjohnson/fast-neural-style/
+        # The network with 9 blocks consists of: c7s1-32, d64, d128, R128, R128, R128,
+        # R128, R128, R128, R128, R128, R128, u64, u32, c7s1-3
+        c1 = reflect_pad_conv(image_normalization, flags.gf_dim, ks=7, s=1, ps=3, padding='VALID', name='c1')
+        # 256x256
+        c2 = instance_normalization_relu_conv2d(c1, flags.gf_dim * 2, ks=3, s=2, padding='SAME', name='c2')
+        # 128x128
+        c3 = instance_normalization_relu_conv2d(c2, flags.gf_dim * 4, ks=3, s=2, padding='SAME', name='c3')
+        # 64x64
+
+        # define G network with 9 resnet blocks
+        r1 = residule_block_why(c3, flags.gf_dim * 4, name='r1')
+        r2 = residule_block_why(r1, flags.gf_dim * 4, name='r2')
+        r3 = residule_block_why(r2, flags.gf_dim * 4, name='r3')
+        r4 = residule_block_why(r3, flags.gf_dim * 4, name='r4')
+        r5 = residule_block_why(r4, flags.gf_dim * 4, name='r5')
+        r6 = residule_block_why(r5, flags.gf_dim * 4, name='r6')
+        r7 = residule_block_why(r6, flags.gf_dim * 4, name='r7')
+        r8 = residule_block_why(r7, flags.gf_dim * 4, name='r8')
+        r9 = residule_block_why(r8, flags.gf_dim * 4, name='r9')
+
+        d2 = skip_combine(r9, c2, flags.gf_dim * 2, name='d2')
+        d1 = skip_combine(d2, c1, flags.gf_dim, name='d1')
+
+        # Pred
+        logits = relu_reflect_pad_conv(d1, flags.c_out_dim, 7, 1, 3, 'VALID', name='logits')
+
+        return logits
+
+
+def discriminator_zero(image, flags, reuse, name):
+    with tf.variable_scope(name, reuse=reuse):
+        # image is 256 x 256 x input_c_dim
+        image_reshape = tf.reshape(image, [-1, flags.image_height, flags.image_width, flags.c_in_dim])
+        image_normalization = image_normalization_one(image_reshape, name='image_normalization_one')
+
+        # PatchGAN n=4, https://github.com/phillipi/pix2pix/blob/master/models.lua#L131
+        # Receptive field=(14x142), https://github.com/phillipi/pix2pix/blob/master/scripts/receptive_field_sizes.m
+        # 128x128,
+        n1 = conv2d(image_normalization, flags.df_dim, ks=4, s=2, padding='SAME', name='n1')
+        # 64x64,
+        n2 = lrelu_conv2d(n1, flags.df_dim * 2, ks=4, s=2, padding='SAME', name='n2')
+        # 32x32,
+        n3 = instance_normalization_lrelu_conv2d(n2, flags.df_dim * 4, ks=4, s=2, padding='SAME', name='n3')
+        # 16x16,
+        n4 = instance_normalization_lrelu_conv2d(n3, flags.df_dim * 8, ks=4, s=2, padding='SAME', name='n4')
+        # 8x8
+        n5 = instance_normalization_lrelu_conv2d(n4, flags.df_dim * 16, ks=4, s=2, padding='SAME', name='n5')
+        # 1x1
+        s1 = instance_normalization_lrelu_conv2d(n5, 1, ks=7, s=1, padding='VALID', name='s1')
+
+        return s1
 
 
 def generator_fpn(image, flags, reuse, name):

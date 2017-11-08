@@ -345,24 +345,20 @@ class GANParser(object):
         writer = tf.python_io.TFRecordWriter(filename.replace('.tfrecords', 'A.tfrecords'))
         for idx, train_path in enumerate(batch_paths_a):
             print('[{:d}/{:d}]'.format(idx, len(batch_paths_a)))
+            img_name = train_path.split('/')[-1].split('.')[0].encode()
             x = np.array(Image.open(train_path))
-            # y = np.array(Image.open(train_path[1]))
 
             rows = x.shape[0]
             cols = x.shape[1]
             # Some images are gray-scale
             if len(x.shape) < 3:
                 x = np.dstack((x, x, x))
-            # Label [92, 183] -> [1, 92]
-            # y[np.nonzero(y < 92)] = 183
-            # y -= 91
 
             image_raw = x.tostring()
-            # label_raw = y.tostring()
             example = tf.train.Example(features=tf.train.Features(feature={
                 'height': _int64_feature(rows),
                 'width': _int64_feature(cols),
-                # 'label_raw': _bytes_feature(label_raw),
+                'image_name': _bytes_feature(img_name),
                 'image_raw': _bytes_feature(image_raw)}))
             writer.write(example.SerializeToString())
 
@@ -374,24 +370,20 @@ class GANParser(object):
         writer = tf.python_io.TFRecordWriter(filename.replace('.tfrecords', 'B.tfrecords'))
         for idx, train_path in enumerate(batch_paths_b):
             print('[{:d}/{:d}]'.format(idx, len(batch_paths_b)))
+            img_name = train_path.split('/')[-1].split('.')[0].encode()
             x = np.array(Image.open(train_path))
-            # y = np.array(Image.open(train_path[1]))
 
             rows = x.shape[0]
             cols = x.shape[1]
             # Some images are gray-scale
             if len(x.shape) < 3:
                 x = np.dstack((x, x, x))
-            # Label [92, 183] -> [1, 92]
-            # y[np.nonzero(y < 92)] = 183
-            # y -= 91
 
             image_raw = x.tostring()
-            # label_raw = y.tostring()
             example = tf.train.Example(features=tf.train.Features(feature={
                 'height': _int64_feature(rows),
                 'width': _int64_feature(cols),
-                # 'label_raw': _bytes_feature(label_raw),
+                'image_name': _bytes_feature(img_name),
                 'image_raw': _bytes_feature(image_raw)}))
             writer.write(example.SerializeToString())
 
@@ -408,8 +400,8 @@ class GANParser(object):
                 features={
                     'height': tf.FixedLenFeature([], tf.int64),
                     'width': tf.FixedLenFeature([], tf.int64),
-                    # 'label_raw': tf.FixedLenFeature([], tf.string),
-                    'image_raw': tf.FixedLenFeature([], tf.string)
+                    'image_raw': tf.FixedLenFeature([], tf.string),
+                    'image_name': tf.FixedLenFeature([], tf.string)
                 })
 
             height = tf.cast(features['height'], tf.int32)
@@ -469,7 +461,7 @@ class GANParser(object):
             image = combined_crop
             # label = combined_crop[:, :, -1]
             image = self.preprocess_data(image=image)
-            return image
+            return image, features['image_name'], [height, width]
 
         filename = os.path.join(self.TFRecord_dir, name)
         # filename1 = os.path.join(self.TFRecord_dir, 'coco_stuff2017_train_super.tfrecords')
@@ -493,7 +485,8 @@ class GANParser(object):
         # image = (np.array(image) + 1.0) * 127.5
         return image
 
-    def visualize_data(self, real_a, real_b, adjusted_a, segment_a, fake_b, shape, global_step, logs_dir):
+    def visualize_data(self, real_a, real_b, adjusted_a, segment_a, fake_b, shape, global_step, logs_dir,
+                       real_a_name, real_b_name):
         real_a = merge(self.deprocess_data(image=real_a), size=shape)
         real_b = merge(self.deprocess_data(image=real_b), size=shape)
         adjusted_a = merge(self.deprocess_data(image=adjusted_a), size=shape)
@@ -501,21 +494,21 @@ class GANParser(object):
         fake_b = merge(self.deprocess_data(image=fake_b), size=shape)
 
         x_png = Image.fromarray(real_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_0_realA.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_0_{}_realA.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
         x_png = Image.fromarray(segment_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_1_segment_A.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_1_{}_segment_A.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
         x_png = Image.fromarray(adjusted_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_2_adjustedA.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_2_{}_adjustedA.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
         x_png = Image.fromarray(fake_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_3_fakeB.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_3_{}_fakeB.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
 
         x_png = Image.fromarray(real_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_4_realB.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_4_{}_realB.png'.format(
+            logs_dir, global_step, real_b_name), format='PNG')
 
     def visualize_data_zero(self, real_a, real_b, adjusted_a, segment_a, fake_b,
                             segment_a_0, segment_a_1, segment_a_2, shape, global_step, logs_dir):
@@ -645,6 +638,7 @@ class SemanticParser(object):
         writer = tf.python_io.TFRecordWriter(filename.replace('.tfrecords', 'A.tfrecords'))
         for idx, train_path in enumerate(batch_paths_a):
             print('[{:d}/{:d}]'.format(idx, len(batch_paths_a)))
+            img_name = train_path.split('/')[-1].split('.')[0].encode()
             x = np.array(Image.open(train_path))
 
             rows = x.shape[0]
@@ -657,6 +651,7 @@ class SemanticParser(object):
             example = tf.train.Example(features=tf.train.Features(feature={
                 'height': _int64_feature(rows),
                 'width': _int64_feature(cols),
+                'image_name': _bytes_feature(img_name),
                 'image_raw': _bytes_feature(image_raw)}))
             writer.write(example.SerializeToString())
 
@@ -668,6 +663,7 @@ class SemanticParser(object):
         writer = tf.python_io.TFRecordWriter(filename.replace('.tfrecords', 'B.tfrecords'))
         for idx, train_path in enumerate(batch_paths_b):
             print('[{:d}/{:d}]'.format(idx, len(batch_paths_b)))
+            img_name = train_path.split('/')[-1].split('.')[0].encode()
             x = np.array(Image.open(train_path))[:, :, 0]
 
             rows = x.shape[0]
@@ -678,7 +674,7 @@ class SemanticParser(object):
             example = tf.train.Example(features=tf.train.Features(feature={
                 'height': _int64_feature(rows),
                 'width': _int64_feature(cols),
-                # 'label_raw': _bytes_feature(label_raw),
+                'image_name': _bytes_feature(img_name),
                 'image_raw': _bytes_feature(image_raw)}))
             writer.write(example.SerializeToString())
 
@@ -695,7 +691,8 @@ class SemanticParser(object):
                 features={
                     'height': tf.FixedLenFeature([], tf.int64),
                     'width': tf.FixedLenFeature([], tf.int64),
-                    'image_raw': tf.FixedLenFeature([], tf.string)
+                    'image_raw': tf.FixedLenFeature([], tf.string),
+                    'image_name': tf.FixedLenFeature([], tf.string)
                 })
 
             height = tf.cast(features['height'], tf.int32)
@@ -705,10 +702,14 @@ class SemanticParser(object):
                 image = tf.reshape(image, [height, width, 1])
             else:
                 image = tf.reshape(image, [height, width, 3])
+            # min_edge = tf.minimum(height, width)
+            # label = tf.decode_raw(features['label_raw'], tf.uint8)
+            # label = tf.reshape(label, [height, width, 1])
 
             # augmentation:
             if need_augmentation:
                 image = tf.cast(image, tf.float32)
+                # label = tf.cast(label, tf.float32)
                 image = tf.image.random_hue(image, max_delta=0.05)
                 image = tf.image.random_contrast(image, lower=0.3, upper=1.0)
                 image = tf.image.random_brightness(image, max_delta=0.2)
@@ -740,7 +741,7 @@ class SemanticParser(object):
 
             image = combined_crop
             image = self.preprocess_data(image=image)
-            return image
+            return image, features['image_name'], [height, width]
 
         filename = os.path.join(self.TFRecord_dir, name)
         dataset = tf.contrib.data.TFRecordDataset(filename)
@@ -761,93 +762,21 @@ class SemanticParser(object):
         # image = (np.array(image) + 1.0) * 127.5
         return image
 
-    def visualize_data(self, real_a, real_b, segment_a, shape, global_step, logs_dir):
+    def visualize_data(self, real_a, real_b, segment_a, shape, global_step, logs_dir, real_a_name):
         real_a = merge(self.deprocess_data(image=real_a), size=shape)
         real_b = merge(self.deprocess_data(image=real_b), size=shape)
         segment_a = merge(np.array(segment_a) * 255., size=shape)
 
         x_png = Image.fromarray(real_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_0_realA.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_0_{}_realA.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
         x_png = Image.fromarray(segment_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_1_segment_A.png'.format(
-            logs_dir, global_step), format='PNG')
+        x_png.save('{}/{:d}_1_{}_segment_A.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
 
         x_png = Image.fromarray(real_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_4_realB.png'.format(
-            logs_dir, global_step), format='PNG')
-
-    def visualize_data_zero(self, real_a, real_b, adjusted_a, segment_a, fake_b,
-                            segment_a_0, segment_a_1, segment_a_2, shape, global_step, logs_dir):
-        real_a = merge(self.deprocess_data(image=real_a), size=shape)
-        real_b = merge(self.deprocess_data(image=real_b), size=shape)
-        # adjusted_a = merge(self.deprocess_data(image=adjusted_a), size=shape)
-        # segment_a = merge(np.array(segment_a) * 255., size=shape)
-        segment_a_0 = merge(np.array(segment_a_0) * 255., size=shape)
-        segment_a_1 = merge(np.array(segment_a_1) * 255., size=shape)
-        segment_a_2 = merge(np.array(segment_a_2) * 255., size=shape)
-        # fake_b = merge(self.deprocess_data(image=fake_b), size=shape)
-
-        x_png = Image.fromarray(real_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_0_realA.png'.format(
-            logs_dir, global_step), format='PNG')
-
-        x_png = Image.fromarray(segment_a_0.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_1_3_segment0_A.png'.format(
-            logs_dir, global_step), format='PNG')
-        x_png = Image.fromarray(segment_a_1.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_1_2_segment1_A.png'.format(
-            logs_dir, global_step), format='PNG')
-        x_png = Image.fromarray(segment_a_2.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_1_1_segment2_A.png'.format(
-            logs_dir, global_step), format='PNG')
-
-        '''
-        x_png = Image.fromarray(segment_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_1_4_segment_A.png'.format(
-            logs_dir, global_step), format='PNG')
-        x_png = Image.fromarray(adjusted_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_2_adjustedA.png'.format(
-            logs_dir, global_step), format='PNG')
-        x_png = Image.fromarray(fake_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_3_fakeB.png'.format(
-            logs_dir, global_step), format='PNG')
-        '''
-
-        x_png = Image.fromarray(real_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_4_realB.png'.format(
-            logs_dir, global_step), format='PNG')
-
-    def load_data(self, start, end, set_type):
-        batch_paths_a, batch_paths_b = [], []
-        batch_a, batch_b = [], []
-        if set_type == 'train':
-            batch_paths_a = self.images_trainA_paths[start:end]
-            batch_paths_b = self.images_trainB_paths[start:end]
-        elif set_type == 'val':
-            batch_paths_a = self.images_valA_paths[start:end]
-            batch_paths_b = self.images_valB_paths[start:end]
-        elif set_type == 'test':
-            batch_paths_a = self.images_testA_paths[start:end]
-            batch_paths_b = self.images_testB_paths[start:end]
-
-        for idx in range(end - start):
-            print(idx)
-            x = Image.open(batch_paths_a[idx])
-            y = Image.open(batch_paths_b[idx])
-            x = np.array(x.resize((self.image_height, self.image_width), resample=Image.BILINEAR))
-            y = np.array(y.resize((self.image_height, self.image_width), resample=Image.BILINEAR))
-            batch_a.append(x)
-            batch_b.append(y)
-
-        x_png = Image.fromarray(batch_a[0].astype(np.uint8)).convert('RGB')
-        x_png.save('./{}_{:d}_{:d}_A.png'.format(
-            set_type, start, end), format='PNG')
-        x_png = Image.fromarray(batch_b[0].astype(np.uint8)).convert('RGB')
-        x_png.save('./{}_{:d}_{:d}_B.png'.format(
-            set_type, start, end), format='PNG')
-
-        return batch_a, batch_b
+        x_png.save('{}/{:d}_4_{}_realB.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
 
 
 def merge(images, size):

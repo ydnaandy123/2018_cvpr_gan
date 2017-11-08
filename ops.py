@@ -79,12 +79,29 @@ def reflect_pad_conv(input_tensor, output_dim, ks, s, ps, padding, name):
         return conv
 
 
+def relu_reflect_pad_conv(input_tensor, output_dim, ks, s, ps, padding, name):
+    with tf.variable_scope(name):
+        relu = tf.nn.relu(input_tensor, name='relu')
+        image_pad = tf.pad(relu, [[0, 0], [ps, ps], [ps, ps], [0, 0]], "REFLECT", name='pad')
+        conv = conv2d(image_pad, output_dim, ks=ks, s=s, padding=padding, name='conv')
+        return conv
+
+
 def reflect_pad_instance_normalization_relu_conv(input_tensor, output_dim, ks, s, ps, padding, name):
     with tf.variable_scope(name):
         image_pad = tf.pad(input_tensor, [[0, 0], [ps, ps], [ps, ps], [0, 0]], "REFLECT", name='pad')
         normal = instance_normalization(image_pad, name='instance_normalization')
         relu = tf.nn.relu(normal, name='relu')
         conv = conv2d(relu, output_dim=output_dim, ks=ks, s=s, padding=padding, name='conv')
+        return conv
+
+
+def instance_normalization_relu_reflect_pad_conv(input_tensor, output_dim, ks, s, ps, padding, name):
+    with tf.variable_scope(name):
+        normal = instance_normalization(input_tensor, name='instance_normalization')
+        relu = tf.nn.relu(normal, name='relu')
+        relu_pad = tf.pad(relu, [[0, 0], [ps, ps], [ps, ps], [0, 0]], "REFLECT", name='pad')
+        conv = conv2d(relu_pad, output_dim=output_dim, ks=ks, s=s, padding=padding, name='conv')
         return conv
 
 
@@ -143,10 +160,10 @@ def conv2d_lrelu(input_tensor, output_dim, ks, s, padding, name):
         return leaky_relu
 
 
-def lrelu_conv2d(input_tensor, output_dim, ks, s, name):
+def lrelu_conv2d(input_tensor, output_dim, ks, s, padding, name):
     with tf.variable_scope(name):
         leaky_relu = lrelu(input_tensor, name='leaky_relu')
-        conv = conv2d(leaky_relu, output_dim=output_dim, ks=ks, s=s, name='conv')
+        conv = conv2d(leaky_relu, output_dim=output_dim, ks=ks, s=s, padding=padding, name='conv')
         return conv
 
 """
@@ -192,8 +209,8 @@ def skip_squeeze_excitation_layer(x, dim, name):
 def skip_combine(x, y, dim, name):
     with tf.variable_scope(name):
         x_conv = instance_normalization_relu_deconv2d(x, dim, 3, 2, name='x_conv')
-        y_skip = instance_normalization_relu_conv2d(y, dim, ks=1, s=1, padding='SAME', name='y_skip')
-        y_residual = residule_block_rule(y_skip, dim=dim, name='y_residual')
+        y_skip = instance_normalization_relu_conv2d(y, dim, ks=3, s=1, padding='SAME', name='y_skip')
+        y_residual = residule_block_why(y_skip, dim=dim, name='y_residual')
         y_scale = squeeze_excitation_layer(y_residual, ratio=16, name='y_scale')
         fuse = tf.add(x_conv, y_scale, name='fuse')
         return fuse
@@ -262,9 +279,19 @@ def residule_block_rule(x, dim, ks=3, s=1, name='res_se'):
 def residule_block_zero(x, dim, ks=3, s=1, name='res_se'):
     with tf.variable_scope(name):
         p = int((ks - 1) / 2)
-        y1 = reflect_pad_instance_normalization_relu_conv(x, dim, ks, s, ps=p, padding='VALID', name='y1')
-        y2 = reflect_pad_instance_normalization_relu_conv(y1, dim, ks, s, ps=p, padding='VALID', name='y2')
+        y1 = instance_normalization_relu_reflect_pad_conv(x, dim, ks, s, ps=p, padding='VALID', name='y1')
+        y2 = instance_normalization_relu_reflect_pad_conv(y1, dim, ks, s, ps=p, padding='VALID', name='y2')
         residule_out = tf.add(x, y2, name='residule_out')
+    return residule_out
+
+
+def residule_block_why(x, dim, ks=3, s=1, name='res_se'):
+    with tf.variable_scope(name):
+        p = int((ks - 1) / 2)
+        y1 = instance_normalization_relu_reflect_pad_conv(x, dim, ks, s, ps=p, padding='VALID', name='y1')
+        y2 = instance_normalization_relu_reflect_pad_conv(y1, dim, ks, s, ps=p, padding='VALID', name='y2')
+        scale = squeeze_excitation_layer(y2, 16, name='squeeze_excitation_layer')
+        residule_out = tf.add(x, scale, name='residule_out')
     return residule_out
 
 
