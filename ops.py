@@ -17,6 +17,16 @@ Combinations
 """
 
 
+def skip_why(input_tensor, y, scale_size, dim, name):
+    with tf.variable_scope(name):
+        conv = instance_normalization_relu_conv2d(input_tensor, dim, ks=3, s=1, padding='SAME', name='conv')
+        up = tf.image.resize_bilinear(conv, (scale_size, scale_size), name='up_scale')
+        skip = instance_normalization_relu_conv2d(y, dim, ks=1, s=1, padding='SAME', name='skip')
+        combine = tf.concat([up, skip], axis=3, name='combine')
+        fuse = instance_normalization_relu_conv2d(combine, dim, ks=3, s=1, padding='SAME', name='fuse')
+        return fuse
+
+
 def z_up(input_tensor, scale_size, y, dim, name):
     with tf.variable_scope(name):
         up = tf.image.resize_bilinear(input_tensor, (scale_size, scale_size), name='up_scale')
@@ -242,6 +252,20 @@ def squeeze_excitation_layer(x, ratio, name):
         return scale
 
 
+def instance_normalization_relu_squeeze_excitation_layer(x, ratio, name):
+        with tf.variable_scope(name):
+            out_dim = get_shape(x)[3]
+            normal = instance_normalization(x, name='instance_normalization')
+            relu = tf.nn.relu(normal, name='relu')
+            squeeze = global_average_pooling(relu, name='squeeze')
+            excitation = fully_connected(squeeze, units=out_dim / ratio, name='fully_connected1')
+            excitation = tf.nn.relu(excitation, name='relu')
+            excitation = fully_connected(excitation, units=out_dim, name='fully_connected2')
+            excitation = tf.nn.sigmoid(excitation, name='sigmoid')
+            scale = tf.multiply(x, excitation, name='scale')
+            return scale
+
+
 def residule_block_se(x, dim, ks=3, s=1, name='res_se'):
     with tf.variable_scope(name):
         p = int((ks - 1) / 2)
@@ -290,7 +314,7 @@ def residule_block_why(x, dim, ks=3, s=1, name='res_se'):
         p = int((ks - 1) / 2)
         y1 = instance_normalization_relu_reflect_pad_conv(x, dim, ks, s, ps=p, padding='VALID', name='y1')
         y2 = instance_normalization_relu_reflect_pad_conv(y1, dim, ks, s, ps=p, padding='VALID', name='y2')
-        scale = squeeze_excitation_layer(y2, 16, name='squeeze_excitation_layer')
+        scale = instance_normalization_relu_squeeze_excitation_layer(y2, 16, name='squeeze_excitation_layer')
         residule_out = tf.add(x, scale, name='residule_out')
     return residule_out
 
