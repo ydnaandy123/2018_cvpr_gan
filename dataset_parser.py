@@ -148,7 +148,7 @@ class CycleParser(object):
                 break
         writer.close()
 
-    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False, shuffle_size=None):
+    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False, shuffle_size=None, need_flip=True):
         image_height, image_width = self.image_height, self.image_width
 
         def parse_record(record):
@@ -198,7 +198,8 @@ class CycleParser(object):
                 # combined_crop = tf.image.resize_image_with_crop_or_pad(combined, image_height, image_width)
                 combined_crop = tf.image.resize_images(combined, (image_height, image_width, 3))
             #################################################################################################
-            combined_crop = tf.image.random_flip_left_right(combined_crop)
+            if need_flip:
+                combined_crop = tf.image.random_flip_left_right(combined_crop)
 
             image = combined_crop
             # label = combined_crop[:, :, -1]
@@ -306,6 +307,7 @@ class GANParser(object):
         self.checkpoint_dir = os.path.join(flags.logs_dir, 'models')
         self.logs_image_train_dir = os.path.join(flags.logs_dir, 'images_train')
         self.logs_image_val_dir = os.path.join(flags.logs_dir, 'images_val')
+        self.logs_mat_output_dir = os.path.join(flags.logs_dir, 'mat_output')
         self.dir_check()
 
     def dir_check(self):
@@ -318,6 +320,8 @@ class GANParser(object):
             os.makedirs(self.logs_image_train_dir)
         if not os.path.exists(self.logs_image_val_dir):
             os.makedirs(self.logs_image_val_dir)
+        if not os.path.exists(self.logs_mat_output_dir):
+            os.makedirs(self.logs_mat_output_dir)
 
     def load_paths(self, is_jpg=True, load_val=False):
         extension = '*.jpg' if is_jpg else '*.png'
@@ -391,7 +395,7 @@ class GANParser(object):
                 break
         writer.close()
 
-    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False, shuffle_size=None):
+    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False, shuffle_size=None, need_flip=True):
         image_height, image_width = self.image_height, self.image_width
 
         def parse_record(record):
@@ -456,7 +460,8 @@ class GANParser(object):
                 '''
 
             #################################################################################################
-            combined_crop = tf.image.random_flip_left_right(combined_crop)
+            if need_flip:
+                combined_crop = tf.image.random_flip_left_right(combined_crop)
 
             image = combined_crop
             # label = combined_crop[:, :, -1]
@@ -490,6 +495,12 @@ class GANParser(object):
         real_a = merge(self.deprocess_data(image=real_a), size=shape)
         real_b = merge(self.deprocess_data(image=real_b), size=shape)
         adjusted_a = merge(self.deprocess_data(image=adjusted_a), size=shape)
+
+        # TODO: only support batch_size=1
+        binary_a = np.zeros_like(segment_a, dtype=np.uint8)
+        binary_a[segment_a > np.mean(segment_a)] = 255
+        binary_a = merge(binary_a, size=shape)
+
         segment_a = merge(np.array(segment_a) * 255., size=shape)
         fake_b = merge(self.deprocess_data(image=fake_b), size=shape)
 
@@ -499,15 +510,18 @@ class GANParser(object):
         x_png = Image.fromarray(segment_a.astype(np.uint8)).convert('RGB')
         x_png.save('{}/{:d}_1_{}_segment_A.png'.format(
             logs_dir, global_step, real_a_name), format='PNG')
+        x_png = Image.fromarray(binary_a.astype(np.uint8)).convert('RGB')
+        x_png.save('{}/{:d}_2_{}_binary_A.png'.format(
+            logs_dir, global_step, real_a_name), format='PNG')
         x_png = Image.fromarray(adjusted_a.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_2_{}_adjustedA.png'.format(
+        x_png.save('{}/{:d}_3_{}_adjustedA.png'.format(
             logs_dir, global_step, real_a_name), format='PNG')
         x_png = Image.fromarray(fake_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_3_{}_fakeB.png'.format(
+        x_png.save('{}/{:d}_4_{}_fakeB.png'.format(
             logs_dir, global_step, real_a_name), format='PNG')
 
         x_png = Image.fromarray(real_b.astype(np.uint8)).convert('RGB')
-        x_png.save('{}/{:d}_4_{}_realB.png'.format(
+        x_png.save('{}/{:d}_5_{}_realB.png'.format(
             logs_dir, global_step, real_b_name), format='PNG')
 
     def visualize_data_zero(self, real_a, real_b, adjusted_a, segment_a, fake_b,
@@ -664,7 +678,8 @@ class SemanticParser(object):
         for idx, train_path in enumerate(batch_paths_b):
             print('[{:d}/{:d}]'.format(idx, len(batch_paths_b)))
             img_name = train_path.split('/')[-1].split('.')[0].encode()
-            x = np.array(Image.open(train_path))[:, :, 0]
+            # x = np.array(Image.open(train_path))[:, :, 0]
+            x = np.array(Image.open(train_path))
 
             rows = x.shape[0]
             cols = x.shape[1]
@@ -682,7 +697,8 @@ class SemanticParser(object):
                 break
         writer.close()
 
-    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False, shuffle_size=None, is_label=False):
+    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False,
+                             shuffle_size=None, is_label=False, need_flip=True):
         image_height, image_width = self.image_height, self.image_width
 
         def parse_record(record):
@@ -737,7 +753,8 @@ class SemanticParser(object):
                 combined_crop = tf.image.resize_images(combined, (image_height, image_width))
 
             #################################################################################################
-            # combined_crop = tf.image.random_flip_left_right(combined_crop)
+            if need_flip:
+                combined_crop = tf.image.random_flip_left_right(combined_crop)
 
             image = combined_crop
             image = self.preprocess_data(image=image)

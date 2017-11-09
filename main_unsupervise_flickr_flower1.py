@@ -2,13 +2,13 @@ from __future__ import print_function
 import tensorflow as tf
 from dataset_parser import GANParser, ImagePool
 from ops import train_op
-from module import generator_resnet, discriminator_zero, high_light
+from module import generator_resnet, discriminator_se_wgangp, high_light
 import time
 
 flags = tf.app.flags.FLAGS
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/filter_msra_color", "directory of the dataset")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/flickr_flower", "directory of the dataset")
 
 tf.flags.DEFINE_integer("image_height", 224, "image target height")
 tf.flags.DEFINE_integer("image_width", 224, "image target width")
@@ -26,8 +26,8 @@ tf.flags.DEFINE_float("beta1", 0.0, "Momentum term of adam [0.5]")
 tf.flags.DEFINE_float("beta2", 0.9, "Momentum term of adam [0.9999]")
 tf.flags.DEFINE_float("lambda_gp", 10.0, "Gradient penalty lambda hyper parameter [10.0]")
 
-tf.flags.DEFINE_integer('save_freq', 2000, "save a model every save_freq iterations")
-tf.flags.DEFINE_integer('log_freq', 40, "log a model every log_freq iterations")
+tf.flags.DEFINE_integer('save_freq', 8000, "save a model every save_freq iterations")
+tf.flags.DEFINE_integer('log_freq', 80, "log a model every log_freq iterations")
 tf.flags.DEFINE_integer('observe_freq', 400, "observe training image every observe_freq iterations")
 tf.flags.DEFINE_integer('valid_freq', 200, "valid a model every valid_freq iterations")
 tf.flags.DEFINE_integer('valid_num', 20, "num of images for each validation")
@@ -67,13 +67,15 @@ def main(args=None):
                 name='{}_trainA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
                 shuffle_size=None)
             val_a_dataset = dataset_parser.tfrecord_get_dataset(
-                name='{}_valA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size)
+                name='{}_valA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
+                need_flip=False)
             # DatasetB
             training_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_trainB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
-                name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,)
+                name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
+                need_flip=False)
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])
@@ -127,8 +129,8 @@ def main(args=None):
             '''
 
             # A -> B
-            # adjusted_a = tf.zeros_like(real_a, tf.float32, name='mask', optimize=True)
-            adjusted_a = high_light(real_a, name='high_light')
+            adjusted_a = tf.zeros_like(real_a, tf.float32, name='mask', optimize=True)
+            # adjusted_a = high_light(real_a, name='high_light')
             logits_a = generator_resnet(real_a, flags, False, name="Generator_A2B")
             segment_a = tf.nn.tanh(logits_a, name='segment_a')
 
@@ -139,15 +141,16 @@ def main(args=None):
             with tf.variable_scope('Fake_B'):
                 foreground = tf.multiply(real_a, segment_a, name='foreground')
                 background = tf.multiply(adjusted_a, (1 - segment_a), name='background')
-                fake_b = tf.add(foreground, background, name='fake_b')
+                fake_b_logits = tf.add(foreground, background, name='fake_b_logits')
+                fake_b = tf.clip_by_value(fake_b_logits, 0, 255, name='fake_b')
 
             #
             fake_b_f = tf.reshape(fake_b, [-1, image_linear_shape], name='fake_b_f')
             fake_b_pool_f = tf.reshape(fake_b_pool, [-1, image_linear_shape], name='fake_b_pool_f')
             real_b_f = tf.reshape(real_b, [-1, image_linear_shape], name='real_b_f')
-            dis_fake_b = discriminator_zero(fake_b_f, flags, reuse=False, name="Discriminator_B")
-            dis_fake_b_pool = discriminator_zero(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
-            dis_real_b = discriminator_zero(real_b_f, flags, reuse=True, name="Discriminator_B")
+            dis_fake_b = discriminator_se_wgangp(fake_b_f, flags, reuse=False, name="Discriminator_B")
+            dis_fake_b_pool = discriminator_se_wgangp(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
+            dis_real_b = discriminator_se_wgangp(real_b_f, flags, reuse=True, name="Discriminator_B")
 
             # WGAN Loss
             with tf.name_scope('loss_gen_a2b'):
@@ -162,7 +165,7 @@ def main(args=None):
                     differences = fake_b_pool_f - real_b_f
                     interpolates = real_b_f + (alpha * differences)
                     gradients = tf.gradients(
-                        discriminator_zero(interpolates, flags, reuse=True, name="Discriminator_B"),
+                        discriminator_se_wgangp(interpolates, flags, reuse=True, name="Discriminator_B"),
                         [interpolates])[0]
                     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
                     gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2)

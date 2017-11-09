@@ -498,11 +498,12 @@ def generator_resnet(image, options, reuse, name):
             tf.get_variable_scope().reuse_variables()
         else:
             assert tf.get_variable_scope().reuse is False
+        image_normalization = image_normalization_sub(image, name='image_normalization_one')
 
         # Justin Johnson's model from https://github.com/jcjohnson/fast-neural-style/
         # The network with 9 blocks consists of: c7s1-32, d64, d128, R128, R128, R128,
         # R128, R128, R128, R128, R128, R128, u64, u32, c7s1-3
-        c0 = tf.pad(image, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        c0 = tf.pad(image_normalization, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
         c1 = tf.nn.relu(instance_normalization(conv2d(c0, options.gf_dim,
                                                       7, 1, padding='VALID', name='g_e1_c'), 'g_e1_bn'))
         c2 = tf.nn.relu(instance_normalization(conv2d(c1, options.gf_dim*2,
@@ -779,6 +780,29 @@ def discriminator_se_wgangp(image, flags, reuse, name):
         # image is 256 x 256 x input_c_dim
         image_reshape = tf.reshape(image, [-1, flags.image_height, flags.image_width, flags.c_in_dim])
         image_normalization = image_normalization_one(image_reshape, name='image_normalization_one')
+
+        h0 = lrelu(conv2d(image_normalization, flags.df_dim, name='d_h0_conv'))
+        # h0 is (128 x 128 x self.df_dim)
+        h1 = lrelu(instance_normalization(conv2d(h0, flags.df_dim * 2, name='d_h1_conv'), 'd_bn1'))
+        # h1 is (64 x 64 x self.df_dim*2)
+        h2 = lrelu(instance_normalization(conv2d(h1, flags.df_dim * 4, name='d_h2_conv'), 'd_bn2'))
+        # h2 is (32x 32 x self.df_dim*4)
+        h3 = lrelu(instance_normalization(conv2d(h2, flags.df_dim * 8, s=1, name='d_h3_conv'), 'd_bn3'))
+        # h3 is (32 x 32 x self.df_dim*8)
+        h4 = conv2d(h3, 1, s=1, name='d_h3_pred')
+        # h4 is (32 x 32 x 1)
+
+        # h4_average = tf.reduce_mean(h4, axis=[1, 2, 3])
+        # return h4_average
+        # hf_f = tf.reshape(h4, [-1, flags.image_height * flags.image_width // ((2 ** 3) ** 2)], name='hf_f')
+        return h4
+
+
+def discriminator_se_wgangp_sub(image, flags, reuse, name):
+    with tf.variable_scope(name, reuse=reuse):
+        # image is 256 x 256 x input_c_dim
+        image_reshape = tf.reshape(image, [-1, flags.image_height, flags.image_width, flags.c_in_dim])
+        image_normalization = image_normalization_sub(image_reshape, name='image_normalization_one')
 
         h0 = lrelu(conv2d(image_normalization, flags.df_dim, name='d_h0_conv'))
         # h0 is (128 x 128 x self.df_dim)
