@@ -532,6 +532,151 @@ def generator_resnet(image, options, reuse, name):
         return pred
 
 
+def generator_bilinear(image, options, reuse, name):
+    with tf.variable_scope(name):
+        # image is 256 x 256 x input_c_dim
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        else:
+            assert tf.get_variable_scope().reuse is False
+        image_normalization = image_normalization_sub(image, name='image_normalization_one')
+
+        # Justin Johnson's model from https://github.com/jcjohnson/fast-neural-style/
+        # The network with 9 blocks consists of: c7s1-32, d64, d128, R128, R128, R128,
+        # R128, R128, R128, R128, R128, R128, u64, u32, c7s1-3
+        c0 = tf.pad(image_normalization, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        c1 = tf.nn.relu(instance_normalization(conv2d(c0, options.gf_dim,
+                                                      7, 1, padding='VALID', name='g_e1_c'), 'g_e1_bn'))
+        c2 = tf.nn.relu(instance_normalization(conv2d(c1, options.gf_dim*2,
+                                                      3, 2, name='g_e2_c'), 'g_e2_bn'))
+        c3 = tf.nn.relu(instance_normalization(conv2d(c2, options.gf_dim*4,
+                                                      3, 2, name='g_e3_c'), 'g_e3_bn'))
+        # define G network with 9 resnet blocks
+        r1 = residule_block(c3, options.gf_dim*4, name='g_r1')
+        r2 = residule_block(r1, options.gf_dim*4, name='g_r2')
+        r3 = residule_block(r2, options.gf_dim*4, name='g_r3')
+        r4 = residule_block(r3, options.gf_dim*4, name='g_r4')
+        r5 = residule_block(r4, options.gf_dim*4, name='g_r5')
+        r6 = residule_block(r5, options.gf_dim*4, name='g_r6')
+        r7 = residule_block(r6, options.gf_dim*4, name='g_r7')
+        r8 = residule_block(r7, options.gf_dim*4, name='g_r8')
+        r9 = residule_block(r8, options.gf_dim*4, name='g_r9')
+
+        d1 = conv2d(r9, options.gf_dim*2, 3, 2, name='g_d1_dc')
+        d1 = tf.nn.relu(instance_normalization(d1, 'g_d1_bn'))
+        d1 = tf.image.resize_bilinear(d1, (options.image_height // 2, options.image_width // 2), name='d1_up')
+
+        d2 = conv2d(d1, options.gf_dim, 3, 2, name='g_d2_dc')
+        d2 = tf.nn.relu(instance_normalization(d2, 'g_d2_bn'))
+        d2 = tf.image.resize_bilinear(d2, (options.image_height, options.image_width), name='d2_up')
+
+        d2 = tf.pad(d2, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        # pred = tf.nn.tanh(conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c'))
+        pred = conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c')
+
+        return pred
+
+
+def generator_bilinear_concat(image, options, reuse, name):
+    with tf.variable_scope(name):
+        # image is 256 x 256 x input_c_dim
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        else:
+            assert tf.get_variable_scope().reuse is False
+        image_normalization = image_normalization_sub(image, name='image_normalization_one')
+
+        # Justin Johnson's model from https://github.com/jcjohnson/fast-neural-style/
+        # The network with 9 blocks consists of: c7s1-32, d64, d128, R128, R128, R128,
+        # R128, R128, R128, R128, R128, R128, u64, u32, c7s1-3
+        c0 = tf.pad(image_normalization, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        c1 = tf.nn.relu(instance_normalization(conv2d(c0, options.gf_dim,
+                                                      7, 1, padding='VALID', name='g_e1_c'), 'g_e1_bn'))
+        c2 = tf.nn.relu(instance_normalization(conv2d(c1, options.gf_dim*2,
+                                                      3, 2, name='g_e2_c'), 'g_e2_bn'))
+        c3 = tf.nn.relu(instance_normalization(conv2d(c2, options.gf_dim*4,
+                                                      3, 2, name='g_e3_c'), 'g_e3_bn'))
+        # define G network with 9 resnet blocks
+        r1 = residule_block(c3, options.gf_dim*4, name='g_r1')
+        r2 = residule_block(r1, options.gf_dim*4, name='g_r2')
+        r3 = residule_block(r2, options.gf_dim*4, name='g_r3')
+        r4 = residule_block(r3, options.gf_dim*4, name='g_r4')
+        r5 = residule_block(r4, options.gf_dim*4, name='g_r5')
+        r6 = residule_block(r5, options.gf_dim*4, name='g_r6')
+        r7 = residule_block(r6, options.gf_dim*4, name='g_r7')
+        r8 = residule_block(r7, options.gf_dim*4, name='g_r8')
+        r9 = residule_block(r8, options.gf_dim*4, name='g_r9')
+
+        d1 = conv2d(r9, options.gf_dim*2, 3, 2, name='g_d1_dc')
+        d1 = tf.nn.relu(instance_normalization(d1, 'g_d1_bn'))
+        d1 = tf.image.resize_bilinear(d1, (options.image_height // 2, options.image_width // 2), name='d1_up')
+        c2_skip = tf.nn.relu(instance_normalization(conv2d(
+            c2, options.gf_dim*2, 1, 1, name='g_c2_skip'), 'g_c2_skip_bn'))
+        d1 = tf.concat([d1, c2_skip], axis=3, name='d1')
+
+        d2 = conv2d(d1, options.gf_dim, 3, 2, name='g_d2_dc')
+        d2 = tf.nn.relu(instance_normalization(d2, 'g_d2_bn'))
+        d2 = tf.image.resize_bilinear(d2, (options.image_height, options.image_width), name='d2_up')
+        c1_skip = tf.nn.relu(instance_normalization(conv2d(
+            c1, options.gf_dim, 1, 1, name='g_c1_skip'), 'g_c1_skip_bn'))
+        d2 = tf.concat([d2, c1_skip], axis=3, name='d2')
+
+        d2 = tf.pad(d2, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        # pred = tf.nn.tanh(conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c'))
+        pred = conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c')
+
+        return pred
+
+
+def generator_deconv_concat(image, options, reuse, name):
+    with tf.variable_scope(name):
+        # image is 256 x 256 x input_c_dim
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        else:
+            assert tf.get_variable_scope().reuse is False
+        image_normalization = image_normalization_sub(image, name='image_normalization_one')
+
+        # Justin Johnson's model from https://github.com/jcjohnson/fast-neural-style/
+        # The network with 9 blocks consists of: c7s1-32, d64, d128, R128, R128, R128,
+        # R128, R128, R128, R128, R128, R128, u64, u32, c7s1-3
+        c0 = tf.pad(image_normalization, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        c1 = tf.nn.relu(instance_normalization(conv2d(c0, options.gf_dim,
+                                                      7, 1, padding='VALID', name='g_e1_c'), 'g_e1_bn'))
+        c2 = tf.nn.relu(instance_normalization(conv2d(c1, options.gf_dim*2,
+                                                      3, 2, name='g_e2_c'), 'g_e2_bn'))
+        c3 = tf.nn.relu(instance_normalization(conv2d(c2, options.gf_dim*4,
+                                                      3, 2, name='g_e3_c'), 'g_e3_bn'))
+        # define G network with 9 resnet blocks
+        r1 = residule_block(c3, options.gf_dim*4, name='g_r1')
+        r2 = residule_block(r1, options.gf_dim*4, name='g_r2')
+        r3 = residule_block(r2, options.gf_dim*4, name='g_r3')
+        r4 = residule_block(r3, options.gf_dim*4, name='g_r4')
+        r5 = residule_block(r4, options.gf_dim*4, name='g_r5')
+        r6 = residule_block(r5, options.gf_dim*4, name='g_r6')
+        r7 = residule_block(r6, options.gf_dim*4, name='g_r7')
+        r8 = residule_block(r7, options.gf_dim*4, name='g_r8')
+        r9 = residule_block(r8, options.gf_dim*4, name='g_r9')
+
+        d1 = deconv2d(r9, options.gf_dim*2, 3, 2, name='g_d1_dc')
+        d1 = tf.nn.relu(instance_normalization(d1, 'g_d1_bn'))
+        c2_skip = tf.nn.relu(instance_normalization(conv2d(
+            c2, options.gf_dim*2, 1, 1, name='g_c2_skip'), 'g_c2_skip_bn'))
+        d1 = tf.concat([d1, c2_skip], axis=3, name='d1')
+
+        d2 = deconv2d(d1, options.gf_dim, 3, 2, name='g_d2_dc')
+        d2 = tf.nn.relu(instance_normalization(d2, 'g_d2_bn'))
+        c1_skip = tf.nn.relu(instance_normalization(conv2d(
+            c1, options.gf_dim, 1, 1, name='g_c1_skip'), 'g_c1_skip_bn'))
+        d2 = tf.concat([d2, c1_skip], axis=3, name='d2')
+
+        d2 = tf.pad(d2, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
+        # pred = tf.nn.tanh(conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c'))
+        pred = conv2d(d2, options.c_out_dim, 7, 1, padding='VALID', name='g_pred_c')
+
+        return pred
+
+
 def generator_resnet_skip(image, options, reuse, name):
     with tf.variable_scope(name):
         # image is 256 x 256 x input_c_dim

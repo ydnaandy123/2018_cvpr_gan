@@ -6,9 +6,9 @@ from module import generator_resnet, discriminator_se_wgangp, high_light
 import time
 
 flags = tf.app.flags.FLAGS
-tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
+tf.flags.DEFINE_string('mode', "test", "Mode train/ test-dev/ test")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/voc_black", "directory of the dataset")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/msra_black", "directory of the dataset")
 
 tf.flags.DEFINE_integer("image_height", 224, "image target height")
 tf.flags.DEFINE_integer("image_width", 224, "image target width")
@@ -68,14 +68,14 @@ def main(args=None):
                 shuffle_size=None)
             val_a_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # DatasetB
             training_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_trainB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])
@@ -288,6 +288,7 @@ def main(args=None):
                         sess.run([training_a_iterator.initializer, training_b_iterator.initializer])
             elif flags.mode == 'test':
                 from PIL import Image
+                import scipy.io as sio
                 import numpy as np
                 print('Start Testing!')
                 '''
@@ -297,19 +298,27 @@ def main(args=None):
                 sess.run([validation_a_iterator.initializer, validation_b_iterator.initializer])
                 '''
                 with tf.variable_scope('Input_port'):
-                    val_a_handle = sess.run(training_a_iterator.string_handle())
-                    val_b_handle = sess.run(training_b_iterator.string_handle())
-                sess.run([training_a_iterator.initializer, training_b_iterator.initializer])
+                    val_a_handle = sess.run(validation_a_iterator.string_handle())
+                    val_b_handle = sess.run(validation_b_iterator.string_handle())
+                sess.run([validation_a_iterator.initializer, validation_b_iterator.initializer])
                 feed_dict_test = {handle_a: val_a_handle, handle_b: val_b_handle}
                 image_idx = 0
                 while True:
                     try:
-                        segment_a_ori_sess, real_a_name_sess = \
-                            sess.run([segment_a_ori, real_a_name], feed_dict=feed_dict_test)
-                        segment_a_ori_sess = np.squeeze(segment_a_ori_sess) * 255
+                        segment_a_ori_sess, real_a_name_sess, real_b_sess = \
+                            sess.run([segment_a_ori, real_a_name, real_b], feed_dict=feed_dict_test)
+                        segment_a_ori_sess = (np.squeeze(segment_a_ori_sess) + 1.0) * 127.5
                         x_png = Image.fromarray(segment_a_ori_sess.astype(np.uint8))
+                        x_png.save('{}/{}_pred.png'.format(dataset_parser.logs_image_val_dir,
+                                                           real_a_name_sess[0].decode()), format='PNG')
+                        real_b_sess = np.squeeze(real_b_sess)
+                        x_png = Image.fromarray(real_b_sess.astype(np.uint8))
                         x_png.save('{}/{}.png'.format(dataset_parser.logs_image_val_dir,
                                                       real_a_name_sess[0].decode()), format='PNG')
+
+                        sio.savemat('{}/{}.mat'.format(
+                            dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
+                                    {'pred': np.squeeze(segment_a_ori_sess)})
 
                         print(image_idx)
                         image_idx += 1

@@ -613,6 +613,7 @@ class SemanticParser(object):
         self.checkpoint_dir = os.path.join(flags.logs_dir, 'models')
         self.logs_image_train_dir = os.path.join(flags.logs_dir, 'images_train')
         self.logs_image_val_dir = os.path.join(flags.logs_dir, 'images_val')
+        self.logs_mat_output_dir = os.path.join(flags.logs_dir, 'mat_output')
         self.dir_check()
 
     def dir_check(self):
@@ -625,6 +626,8 @@ class SemanticParser(object):
             os.makedirs(self.logs_image_train_dir)
         if not os.path.exists(self.logs_image_val_dir):
             os.makedirs(self.logs_image_val_dir)
+        if not os.path.exists(self.logs_mat_output_dir):
+            os.makedirs(self.logs_mat_output_dir)
 
     def load_paths(self, is_jpg=True, load_val=False):
         extension = '*.jpg' if is_jpg else '*.png'

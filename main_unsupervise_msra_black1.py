@@ -68,14 +68,14 @@ def main(args=None):
                 shuffle_size=None)
             val_a_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # DatasetB
             training_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_trainB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])

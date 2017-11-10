@@ -6,7 +6,7 @@ from module import generator_resnet, discriminator_se_wgangp, high_light
 import time
 
 flags = tf.app.flags.FLAGS
-tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
+tf.flags.DEFINE_string('mode', "test", "Mode train/ test-dev/ test")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
 tf.flags.DEFINE_string('dataset_dir', "./dataset/msra_blur", "directory of the dataset")
 
@@ -68,14 +68,14 @@ def main(args=None):
                 shuffle_size=None)
             val_a_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # DatasetB
             training_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_trainB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])

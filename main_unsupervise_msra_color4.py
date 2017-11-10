@@ -2,11 +2,11 @@ from __future__ import print_function
 import tensorflow as tf
 from dataset_parser import GANParser, ImagePool
 from ops import train_op
-from module import generator_resnet_concat, discriminator_se_wgangp, high_light
+from module import generator_deconv_concat, discriminator_se_wgangp, high_light
 import time
 
 flags = tf.app.flags.FLAGS
-tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
+tf.flags.DEFINE_string('mode', "test", "Mode train/ test-dev/ test")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
 tf.flags.DEFINE_string('dataset_dir', "./dataset/msra_color", "directory of the dataset")
 
@@ -68,14 +68,14 @@ def main(args=None):
                 shuffle_size=None)
             val_a_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # DatasetB
             training_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_trainB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=False)
+                need_flip=(flags.mode == 'train'))
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])
@@ -131,7 +131,7 @@ def main(args=None):
             # A -> B
             # adjusted_a = tf.zeros_like(real_a, tf.float32, name='mask', optimize=True)
             adjusted_a = high_light(real_a, name='high_light')
-            logits_a = generator_resnet_concat(real_a, flags, False, name="Generator_A2B")
+            logits_a = generator_deconv_concat(real_a, flags, False, name="Generator_A2B")
             segment_a = tf.nn.tanh(logits_a, name='segment_a')
 
             logits_a_ori = tf.image.resize_bilinear(
