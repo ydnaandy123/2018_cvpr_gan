@@ -131,6 +131,25 @@ def gaussian_blur(image, name):
         return image
 
 
+def gaussian_blur_single(image, name):
+    with tf.variable_scope(name):
+        # weights = [[0.0625, 0.125, 0.0625], [0.125, 0.25, 0.125], [0.0625, 0.125, 0.0625]]
+        # weights = np.array([[1, 4, 7, 4, 1],
+        #                     [4, 16, 26, 16, 4],
+        #                     [7, 26, 41, 26, 7],
+        #                     [4, 16, 26, 16, 4],
+        #                     [1, 4, 7, 4, 1]], dtype=np.float32) / 273.
+        weights = np.array([[2, 4, 5, 4, 2],
+                            [4, 9, 12, 9, 4],
+                            [5, 12, 15, 12, 5],
+                            [4, 9, 12, 9, 4],
+                            [2, 4, 5, 4, 2]], dtype=np.float32) / 159.
+        init = tf.constant_initializer(weights, dtype=tf.float32)
+        image_blur = tf.layers.conv2d(image, 1, 5, 1, padding='same', bias_initializer=None,
+                                      trainable=False, activation=None, kernel_initializer=init)
+        return image_blur
+
+
 def high_light(image, name):
     with tf.variable_scope(name):
         image_r, image_g, image_b = tf.unstack(image, axis=3)
@@ -1097,6 +1116,27 @@ def discriminator_se_wgangp_sub(image, flags, reuse, name):
         return h4
 
 
+def discriminator_v4(image, flags, reuse, name):
+    with tf.variable_scope(name, reuse=reuse):
+        # image is 256 x 256 x input_c_dim
+        image_reshape = tf.reshape(image, [-1, flags.image_height, flags.image_width, flags.c_in_dim])
+        image_normalization = image_normalization_one(image_reshape, name='image_normalization_one')
+
+        h0 = lrelu(conv2d(image_normalization, flags.df_dim, name='d_h0_conv'))
+        # h0 is (128 x 128 x self.df_dim)
+        h1 = lrelu(instance_normalization(conv2d(h0, flags.df_dim * 2, name='d_h1_conv'), 'd_bn1'))
+        # h1 is (64 x 64 x self.df_dim*2)
+        h2 = lrelu(instance_normalization(conv2d(h1, flags.df_dim * 4, name='d_h2_conv'), 'd_bn2'))
+        # h2 is (32x 32 x self.df_dim*4)
+        h3 = lrelu(instance_normalization(conv2d(h2, flags.df_dim * 8, name='d_h3_conv'), 'd_bn3'))
+        # h3 is (16x 16 x self.df_dim*8
+        h4 = lrelu(instance_normalization(conv2d(h3, flags.df_dim * 16, name='d_h4_conv'), 'd_bn4'))
+        # h4 is (7x 7 x self.df_dim*16)
+        h5 = conv2d(h4, 1, ks=7, padding='valid', name='d_h5_pred')
+        # h4 is (1 x 1 x 1)
+        return h5
+
+
 def discriminator_rule(image, flags, reuse, name):
     with tf.variable_scope(name, reuse=reuse):
         # image is 256 x 256 x input_c_dim
@@ -1591,6 +1631,77 @@ def generator_combine(image, flags, reuse, name):
         # pred_s0 = pred_output(d1_concat, flags.c_out_dim, 7, 1, ps=3, name='pred_s0')
 
         return pred_s2
+
+
+def discriminator_v5(image, flags, reuse, name):
+    with tf.variable_scope(name, reuse=reuse):
+        # image range: [0, 255]
+        image_reshape = tf.reshape(image, [-1, flags.image_height, flags.image_width, flags.c_in_dim])
+        image_normalization = image_normalization_one(image_reshape, name='image_normalization_one')
+
+        # PatchGAN n=3, https://github.com/phillipi/pix2pix/blob/master/models.lua#L131
+        # Receptive field=(70, 70), https://github.com/phillipi/pix2pix/blob/master/scripts/receptive_field_sizes.m
+        n1 = conv2d(image_normalization, flags.df_dim, ks=4, s=2, padding='SAME', name='n1')
+        # 128x128,
+        n2 = lrelu_conv2d(n1, flags.df_dim * 2, ks=4, s=2, padding='SAME', name='n2')  # First layer no normalization
+        # 64x64,
+        n3 = instance_normalization_lrelu_conv2d(n2, flags.df_dim * 4, ks=4, s=2, padding='SAME', name='n3')
+        # 32x32,
+
+        s1 = instance_normalization_lrelu_conv2d(n3, flags.df_dim * 8, ks=4, s=1, padding='SAME', name='s1')
+        # 32x32
+        s2 = instance_normalization_lrelu_conv2d(s1, 1, ks=4, s=1, padding='SAME', name='s2')
+        # 32x32
+
+        return s2
+
+
+def train_op(loss, learning_rate, flags, var_list, name):
+    with tf.variable_scope(name):
+        optimizer = tf.train.AdamOptimizer(learning_rate, flags.beta1, flags.beta2, name='optimizer')
+        grads = optimizer.compute_gradients(loss, var_list=var_list)
+        '''
+        if flags.debug:
+            for grad, var in grads:
+                if grad is not None:
+                    tf.summary.histogram(var.op.name + "/gradient", grad)
+        '''
+        return optimizer.apply_gradients(grads, name='train_op')
+
+
+def generator_v5(image, flags, reuse, name):
+    with tf.variable_scope(name, reuse=reuse):
+        # image range: [0, 255]
+        image_normalization = image_normalization_sub(image, name='image_normalization_sub')
+
+        # xhujoy/CycleGAN-tensorflow https://github.com/xhujoy/CycleGAN-tensorflow
+        # Justin Johnson's model from https://github.com/jcjohnson/fast-neural-style/
+        # The network with 9 blocks consists of: c7s1-32, d64, d128, R128, R128, R128,
+        # R128, R128, R128, R128, R128, R128, u64, u32, c7s1-3
+        c1 = reflect_pad_conv(image_normalization, flags.gf_dim, ks=7, s=1, ps=3, padding='VALID', name='c1')
+        # 256x256
+        c2 = instance_normalization_relu_conv2d(c1, flags.gf_dim * 2, ks=3, s=2, padding='SAME', name='c2')
+        # 128x128
+        c3 = instance_normalization_relu_conv2d(c2, flags.gf_dim * 4, ks=3, s=2, padding='SAME', name='c3')
+        # 64x64
+
+        # define G network with 9 resnet blocks
+        r1 = residule_block_v5(c3, flags.gf_dim * 4, name='r1')
+        r2 = residule_block_v5(r1, flags.gf_dim * 4, name='r2')
+        r3 = residule_block_v5(r2, flags.gf_dim * 4, name='r3')
+        r4 = residule_block_v5(r3, flags.gf_dim * 4, name='r4')
+        r5 = residule_block_v5(r4, flags.gf_dim * 4, name='r5')
+        r6 = residule_block_v5(r5, flags.gf_dim * 4, name='r6')
+        r7 = residule_block_v5(r6, flags.gf_dim * 4, name='r7')
+        r8 = residule_block_v5(r7, flags.gf_dim * 4, name='r8')
+        r9 = residule_block_v5(r8, flags.gf_dim * 4, name='r9')
+
+        d2 = skip_v5(r9, c2, flags.image_height // 2, flags.gf_dim * 2, name='d2')
+        d1 = skip_v5(d2, c1, flags.image_height, flags.gf_dim, name='d1')
+        logits = instance_normalization_relu_reflect_pad_conv(
+            d1, flags.c_out_dim, ks=7, s=1, ps=3, padding='VALID', name='logits')
+
+        return logits
 
 
 def blend_fake_b(real_a, adjusted_a, segment_a, name):

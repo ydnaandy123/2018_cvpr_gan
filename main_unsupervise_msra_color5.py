@@ -1,12 +1,8 @@
 from __future__ import print_function
 import tensorflow as tf
 from dataset_parser import GANParser, ImagePool
-from ops import train_op
-from module import generator_resnet, discriminator_se_wgangp, high_light
+from module import generator_v5, discriminator_v5, high_light, train_op
 import time
-import tensorflow.contrib.slim as slim
-from tensorflow.contrib.slim.nets import resnet_v1
-from ops import conv2d, deconv2d, instance_normalization
 
 flags = tf.app.flags.FLAGS
 tf.flags.DEFINE_string('mode', "test", "Mode train/ test-dev/ test")
@@ -49,7 +45,7 @@ def main(args=None):
     Transform data to TFRecord format (Only do once.)     
     """
     if False:
-        dataset_parser.load_paths(is_jpg=True, load_val=True)
+        dataset_parser.load_paths(is_jpg=False, load_val=True)
         dataset_parser.data2record(name='{}_train.tfrecords'.format(dataset_parser.dataset_name),
                                    set_type='train', test_num=None)
         dataset_parser.data2record(name='{}_val.tfrecords'.format(dataset_parser.dataset_name),
@@ -64,7 +60,7 @@ def main(args=None):
         """
         Input (TFRecord)
         """
-        with tf.name_scope('TFRecord'):
+        with tf.variable_scope('TFRecord'):
             # DatasetA
             training_a_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_trainA.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
@@ -99,11 +95,11 @@ def main(args=None):
         """
         Network (Computes predictions from the inference model)
         """
-        with tf.name_scope('Network'):
+        with tf.variable_scope('Network'):
             # Input
             global_step = tf.Variable(0, trainable=False, name='global_step', dtype=tf.int32)
             global_step_update_op = tf.assign_add(global_step, 1, name='global_step_update_op')
-            mean_rgb = tf.constant((123.68, 116.78, 103.94), dtype=tf.float32)
+            # mean_rgb = tf.constant((123.68, 116.78, 103.94), dtype=tf.float32)
             fake_b_pool = tf.placeholder(tf.float32,
                                          shape=[None, flags.image_height, flags.image_width, flags.c_in_dim],
                                          name='fake_B_pool')
@@ -111,48 +107,9 @@ def main(args=None):
                                              dtype=tf.int32, name='image_linear_shape')
 
             # A -> B
-            '''
-            with tf.name_scope('Generator'):
-                with slim.arg_scope(vgg.vgg_arg_scope()):
-                    net, end_points = vgg.vgg_16(real_a - mean_rgb, num_classes=1, is_training=True, 
-                    spatial_squeeze=False)
-                    print(net)
-                    return
-
-                with tf.variable_scope('Generator_A2B'):
-                    pred = tf.layers.conv2d(tf.nn.relu(net), 1, 1, 1)
-                    pred_upscale = tf.image.resize_bilinear(pred, (flags.image_height, flags.image_width), 
-                    name='up_scale')
-                    segment_a = tf.nn.sigmoid(pred_upscale, name='segment_a')
-
-            # sigmoid cross entropy Loss
-            with tf.name_scope('loss_gen_a2b'):
-                loss_gen_a2b = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=pred_upscale, labels=real_b/255.0, name='sigmoid'), name='mean')
-            '''
-
-            # A -> B
-            with tf.name_scope('Generator'):
-                with slim.arg_scope(resnet_v1.resnet_arg_scope()):
-                    net, end_points = resnet_v1.resnet_v1_50(real_a - mean_rgb, num_classes=None, is_training=True,
-                                                             global_pool=False, output_stride=8)
-
-                with tf.variable_scope('Generator_A2B'):
-                    d1 = deconv2d(net, 256, 3, 2, name='g_d1_dc')
-                    d1 = tf.nn.relu(instance_normalization(d1, 'g_d1_bn'))
-                    d2 = deconv2d(d1, 128, 3, 2, name='g_d2_dc')
-                    d2 = tf.nn.relu(instance_normalization(d2, 'g_d2_bn'))
-                    d3 = deconv2d(d2, 64, 3, 2, name='g_d3_dc')
-                    d3 = tf.nn.relu(instance_normalization(d3, 'g_d3_bn'))
-
-                    d3 = tf.pad(d3, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
-                    logits_a = conv2d(d3, 1, 7, 1, padding='VALID', name='g_pred_c')
-
-            # A -> B
-            adjusted_a = high_light(real_a, name='high_light')
             # adjusted_a = tf.zeros_like(real_a, tf.float32, name='mask', optimize=True)
-            # logits_a = generator_resnet(real_a, flags, False, name="Generator_A2B")
-            # adjusted_a = tf.layers.average_pooling2d(real_a, 11, strides=1, padding='same', name='adjusted_a')
+            adjusted_a = high_light(real_a, name='high_light')
+            logits_a = generator_v5(real_a, flags, False, name="Generator_A2B")
             segment_a = tf.nn.tanh(logits_a, name='segment_a')
 
             logits_a_ori = tf.image.resize_bilinear(
@@ -169,9 +126,9 @@ def main(args=None):
             fake_b_f = tf.reshape(fake_b, [-1, image_linear_shape], name='fake_b_f')
             fake_b_pool_f = tf.reshape(fake_b_pool, [-1, image_linear_shape], name='fake_b_pool_f')
             real_b_f = tf.reshape(real_b, [-1, image_linear_shape], name='real_b_f')
-            dis_fake_b = discriminator_se_wgangp(fake_b_f, flags, reuse=False, name="Discriminator_B")
-            dis_fake_b_pool = discriminator_se_wgangp(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
-            dis_real_b = discriminator_se_wgangp(real_b_f, flags, reuse=True, name="Discriminator_B")
+            dis_fake_b = discriminator_v5(fake_b_f, flags, reuse=False, name="Discriminator_B")
+            dis_fake_b_pool = discriminator_v5(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
+            dis_real_b = discriminator_v5(real_b_f, flags, reuse=True, name="Discriminator_B")
 
             # WGAN Loss
             with tf.name_scope('loss_gen_a2b'):
@@ -186,22 +143,24 @@ def main(args=None):
                     differences = fake_b_pool_f - real_b_f
                     interpolates = real_b_f + (alpha * differences)
                     gradients = tf.gradients(
-                        discriminator_se_wgangp(interpolates, flags, reuse=True, name="Discriminator_B"),
+                        discriminator_v5(interpolates, flags, reuse=True, name="Discriminator_B"),
                         [interpolates])[0]
                     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
                     gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2)
                     loss_dis_b += flags.lambda_gp * gradient_penalty
 
             # Optimizer
+            '''
             trainable_var_resnet = tf.get_collection(
-                key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='resnet_v1_50')
+                key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='vgg_16')
             trainable_var_gen_a2b = tf.get_collection(
                 key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Generator_A2B') + trainable_var_resnet
-            # slim.model_analyzer.analyze_vars(trainable_var_gen_a2b, print_info=True)
-            # trainable_var_gen_a2b = tf.get_collection(
-            #     key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Generator_A2B')
+            slim.model_analyzer.analyze_vars(trainable_var_gen_a2b, print_info=True)
+            '''
+            trainable_var_gen_a2b = tf.get_collection(
+                key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Network/Generator_A2B')
             trainable_var_dis_b = tf.get_collection(
-                key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Discriminator_B')
+                key=tf.GraphKeys.TRAINABLE_VARIABLES, scope='Network/Discriminator_B')
             with tf.name_scope('learning_rate_decay'):
                 decay = tf.maximum(0., 1. - (tf.cast(global_step, tf.float32) / flags.training_iter), name='decay')
                 learning_rate = tf.multiply(flags.learning_rate, decay, name='learning_rate')
@@ -233,9 +192,9 @@ def main(args=None):
                     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
                     sess.run(init_op)
 
-                    init_fn = slim.assign_from_checkpoint_fn('./pretrained/resnet_v1_50.ckpt',
-                                                             slim.get_model_variables('resnet_v1_50'))
-                    init_fn(sess)
+                    # init_fn = slim.assign_from_checkpoint_fn('./pretrained/vgg_16.ckpt',
+                    #                                          slim.get_model_variables('vgg_16'))
+                    # init_fn(sess)
                 summary_writer = tf.summary.FileWriter(dataset_parser.logs_dir, sess.graph)
             """
             Training Mode
@@ -338,12 +297,12 @@ def main(args=None):
                         segment_a_np_blur = scipy.ndimage.filters.gaussian_filter(segment_a_np, sigma=3)
                         binary_a[segment_a_np_blur > binary_a_ave] = 255
 
-                        # sio.savemat('{}/{}.mat'.format(
-                        #     dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
-                        #             {'pred': segment_a_np, 'binary': binary_a})
+                        sio.savemat('{}/{}.mat'.format(
+                            dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
+                                    {'pred': segment_a_np, 'binary': binary_a})
 
                         # -----------------------------------------------------------------------------
-                        if image_idx % 1 == 0:
+                        if image_idx % 100 == 0:
                             real_a_sess = np.squeeze(real_a_sess)
                             x_png = Image.fromarray(real_a_sess.astype(np.uint8))
                             x_png.save('{}/{}_0_img.png'.format(dataset_parser.logs_image_val_dir,

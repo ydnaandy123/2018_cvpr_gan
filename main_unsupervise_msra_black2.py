@@ -9,9 +9,9 @@ from tensorflow.contrib.slim.nets import resnet_v1
 from ops import conv2d, deconv2d, instance_normalization
 
 flags = tf.app.flags.FLAGS
-tf.flags.DEFINE_string('mode', "train", "Mode train/ test-dev/ test")
+tf.flags.DEFINE_string('mode', "test", "Mode train/ test-dev/ test")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/msra_black", "directory of the dataset")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/test_flower17", "directory of the dataset")
 
 tf.flags.DEFINE_integer("image_height", 224, "image target height")
 tf.flags.DEFINE_integer("image_width", 224, "image target width")
@@ -78,7 +78,7 @@ def main(args=None):
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=(flags.mode == 'train'))
+                is_label=True, need_flip=(flags.mode == 'train'))
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])
@@ -322,20 +322,38 @@ def main(args=None):
                 image_idx = 0
                 while True:
                     try:
-                        segment_a_ori_sess, real_a_name_sess, real_b_sess = \
-                            sess.run([segment_a_ori, real_a_name, real_b], feed_dict=feed_dict_test)
-                        segment_a_ori_sess = (np.squeeze(segment_a_ori_sess) + 1.0) * 127.5
-                        x_png = Image.fromarray(segment_a_ori_sess.astype(np.uint8))
-                        x_png.save('{}/{}_pred.png'.format(dataset_parser.logs_image_val_dir,
-                                                           real_a_name_sess[0].decode()), format='PNG')
-                        real_b_sess = np.squeeze(real_b_sess)
-                        x_png = Image.fromarray(real_b_sess.astype(np.uint8))
-                        x_png.save('{}/{}.png'.format(dataset_parser.logs_image_val_dir,
-                                                      real_a_name_sess[0].decode()), format='PNG')
-
+                        segment_a_ori_sess, real_a_name_sess, real_b_sess, real_a_sess, fake_b_sess = \
+                            sess.run([segment_a_ori, real_a_name, real_b, real_a, fake_b], feed_dict=feed_dict_test)
+                        segment_a_np = (np.squeeze(segment_a_ori_sess) + 1.0) * 127.5
+                        binary_a = np.zeros_like(segment_a_np, dtype=np.uint8)
+                        binary_a[segment_a_np > 127.5] = 255
+                        # sio.savemat('{}/{}.mat'.format(
+                        #     dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
+                        #             {'pred': segment_a_np, 'binary': binary_a})
                         sio.savemat('{}/{}.mat'.format(
                             dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
-                                    {'pred': np.squeeze(segment_a_ori_sess)})
+                            {'pred': segment_a_np.astype(np.uint8)})
+
+                        # -----------------------------------------------------------------------------
+                        if image_idx % 500 == 0:
+                            real_a_sess = np.squeeze(real_a_sess)
+                            x_png = Image.fromarray(real_a_sess.astype(np.uint8))
+                            x_png.save('{}/{}_0_img.png'.format(dataset_parser.logs_image_val_dir,
+                                                                real_a_name_sess[0].decode()), format='PNG')
+                            x_png = Image.fromarray(segment_a_np.astype(np.uint8))
+                            x_png.save('{}/{}_1_pred.png'.format(dataset_parser.logs_image_val_dir,
+                                                                 real_a_name_sess[0].decode()), format='PNG')
+                            x_png = Image.fromarray(binary_a.astype(np.uint8))
+                            x_png.save('{}/{}_2_binary.png'.format(dataset_parser.logs_image_val_dir,
+                                                                   real_a_name_sess[0].decode()), format='PNG')
+                            fake_b_sess = np.squeeze(fake_b_sess)
+                            x_png = Image.fromarray(fake_b_sess.astype(np.uint8))
+                            x_png.save('{}/{}_3_fake.png'.format(dataset_parser.logs_image_val_dir,
+                                                                 real_a_name_sess[0].decode()), format='PNG')
+                            real_b_sess = np.squeeze(real_b_sess)
+                            x_png = Image.fromarray(real_b_sess.astype(np.uint8))
+                            x_png.save('{}/{}_4_gt.png'.format(dataset_parser.logs_image_val_dir,
+                                                               real_a_name_sess[0].decode()), format='PNG')
 
                         print(image_idx)
                         image_idx += 1

@@ -395,7 +395,8 @@ class GANParser(object):
                 break
         writer.close()
 
-    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False, shuffle_size=None, need_flip=True):
+    def tfrecord_get_dataset(self, name, batch_size, need_augmentation=False,
+                             shuffle_size=None, need_flip=True, is_label=False):
         image_height, image_width = self.image_height, self.image_width
 
         def parse_record(record):
@@ -411,7 +412,10 @@ class GANParser(object):
             height = tf.cast(features['height'], tf.int32)
             width = tf.cast(features['width'], tf.int32)
             image = tf.decode_raw(features['image_raw'], tf.uint8)
-            image = tf.reshape(image, [height, width, 3])
+            if is_label:
+                image = tf.reshape(image, [height, width, 1])
+            else:
+                image = tf.reshape(image, [height, width, 3])
             # min_edge = tf.minimum(height, width)
             # label = tf.decode_raw(features['label_raw'], tf.uint8)
             # label = tf.reshape(label, [height, width, 1])
@@ -501,7 +505,7 @@ class GANParser(object):
         binary_a[segment_a > np.mean(segment_a)] = 255
         binary_a = merge(binary_a, size=shape)
 
-        segment_a = merge(np.array(segment_a) * 255., size=shape)
+        segment_a = merge((np.array(segment_a) + 1.0) * 127.5, size=shape)
         fake_b = merge(self.deprocess_data(image=fake_b), size=shape)
 
         x_png = Image.fromarray(real_a.astype(np.uint8)).convert('RGB')
@@ -686,6 +690,8 @@ class SemanticParser(object):
 
             rows = x.shape[0]
             cols = x.shape[1]
+            if len(x.shape) >= 3:
+                x = x[:, :, 0]
             # All labels are gray-scale
 
             image_raw = x.tostring()

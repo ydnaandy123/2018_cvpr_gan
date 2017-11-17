@@ -2,13 +2,13 @@ from __future__ import print_function
 import tensorflow as tf
 from dataset_parser import GANParser, ImagePool
 from ops import train_op
-from module import generator_deconv_concat, discriminator_se_wgangp, high_light
+from module import generator_bilinear_concat, discriminator_v4, high_light
 import time
 
 flags = tf.app.flags.FLAGS
 tf.flags.DEFINE_string('mode', "test", "Mode train/ test-dev/ test")
 tf.flags.DEFINE_boolean('debug', True, "Is debug mode or not")
-tf.flags.DEFINE_string('dataset_dir', "./dataset/msra_color", "directory of the dataset")
+tf.flags.DEFINE_string('dataset_dir', "./dataset/msra4750", "directory of the dataset")
 
 tf.flags.DEFINE_integer("image_height", 224, "image target height")
 tf.flags.DEFINE_integer("image_width", 224, "image target width")
@@ -75,7 +75,7 @@ def main(args=None):
                 shuffle_size=None)
             val_b_dataset = dataset_parser.tfrecord_get_dataset(
                 name='{}_valB.tfrecords'.format(dataset_parser.dataset_name), batch_size=flags.batch_size,
-                need_flip=(flags.mode == 'train'))
+                is_label=True, need_flip=(flags.mode == 'train'))
             # A feed-able iterator
             with tf.name_scope('RealA'):
                 handle_a = tf.placeholder(tf.string, shape=[])
@@ -131,7 +131,8 @@ def main(args=None):
             # A -> B
             # adjusted_a = tf.zeros_like(real_a, tf.float32, name='mask', optimize=True)
             adjusted_a = high_light(real_a, name='high_light')
-            logits_a = generator_deconv_concat(real_a, flags, False, name="Generator_A2B")
+            # adjusted_a = tf.layers.average_pooling2d(real_a, 11, strides=1, padding='same', name='adjusted_a')
+            logits_a = generator_bilinear_concat(real_a, flags, False, name="Generator_A2B")
             segment_a = tf.nn.tanh(logits_a, name='segment_a')
 
             logits_a_ori = tf.image.resize_bilinear(
@@ -148,9 +149,9 @@ def main(args=None):
             fake_b_f = tf.reshape(fake_b, [-1, image_linear_shape], name='fake_b_f')
             fake_b_pool_f = tf.reshape(fake_b_pool, [-1, image_linear_shape], name='fake_b_pool_f')
             real_b_f = tf.reshape(real_b, [-1, image_linear_shape], name='real_b_f')
-            dis_fake_b = discriminator_se_wgangp(fake_b_f, flags, reuse=False, name="Discriminator_B")
-            dis_fake_b_pool = discriminator_se_wgangp(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
-            dis_real_b = discriminator_se_wgangp(real_b_f, flags, reuse=True, name="Discriminator_B")
+            dis_fake_b = discriminator_v4(fake_b_f, flags, reuse=False, name="Discriminator_B")
+            dis_fake_b_pool = discriminator_v4(fake_b_pool_f, flags, reuse=True, name="Discriminator_B")
+            dis_real_b = discriminator_v4(real_b_f, flags, reuse=True, name="Discriminator_B")
 
             # WGAN Loss
             with tf.name_scope('loss_gen_a2b'):
@@ -165,7 +166,7 @@ def main(args=None):
                     differences = fake_b_pool_f - real_b_f
                     interpolates = real_b_f + (alpha * differences)
                     gradients = tf.gradients(
-                        discriminator_se_wgangp(interpolates, flags, reuse=True, name="Discriminator_B"),
+                        discriminator_v4(interpolates, flags, reuse=True, name="Discriminator_B"),
                         [interpolates])[0]
                     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
                     gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2)
@@ -288,6 +289,7 @@ def main(args=None):
                         sess.run([training_a_iterator.initializer, training_b_iterator.initializer])
             elif flags.mode == 'test':
                 from PIL import Image
+                import scipy.ndimage.filters
                 import scipy.io as sio
                 import numpy as np
                 print('Start Testing!')
@@ -305,20 +307,46 @@ def main(args=None):
                 image_idx = 0
                 while True:
                     try:
-                        segment_a_ori_sess, real_a_name_sess, real_b_sess = \
-                            sess.run([segment_a_ori, real_a_name, real_b], feed_dict=feed_dict_test)
-                        segment_a_ori_sess = (np.squeeze(segment_a_ori_sess) + 1.0) * 127.5
-                        x_png = Image.fromarray(segment_a_ori_sess.astype(np.uint8))
-                        x_png.save('{}/{}_pred.png'.format(dataset_parser.logs_image_val_dir,
-                                                           real_a_name_sess[0].decode()), format='PNG')
-                        real_b_sess = np.squeeze(real_b_sess)
-                        x_png = Image.fromarray(real_b_sess.astype(np.uint8))
-                        x_png.save('{}/{}.png'.format(dataset_parser.logs_image_val_dir,
-                                                      real_a_name_sess[0].decode()), format='PNG')
+                        segment_a_ori_sess, real_a_name_sess, real_b_sess, real_a_sess, fake_b_sess = \
+                            sess.run([segment_a_ori, real_a_name, real_b, real_a, fake_b], feed_dict=feed_dict_test)
+                        segment_a_np = (np.squeeze(segment_a_ori_sess) + 1.0) * 127.5
+                        binary_a = np.zeros_like(segment_a_np, dtype=np.uint8)
 
+                        # binary_a[segment_a_np > 127.5] = 255
+                        binary_mean = np.mean(segment_a_np)
+                        binary_a_high = np.mean(segment_a_np[segment_a_np > binary_mean])
+                        binary_a_low = np.mean(segment_a_np[segment_a_np < binary_mean])
+                        binary_a_ave = (binary_a_high + binary_a_low) / 2.0
+                        segment_a_np_blur = scipy.ndimage.filters.gaussian_filter(segment_a_np, sigma=3)
+                        binary_a[segment_a_np_blur > binary_a_ave] = 255
+
+                        # sio.savemat('{}/{}.mat'.format(
+                        #     dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
+                        #             {'pred': segment_a_np, 'binary': binary_a})
                         sio.savemat('{}/{}.mat'.format(
                             dataset_parser.logs_mat_output_dir, real_a_name_sess[0].decode()),
-                                    {'pred': np.squeeze(segment_a_ori_sess)})
+                            {'pred': segment_a_np.astype(np.uint8)})
+
+                        # -----------------------------------------------------------------------------
+                        if image_idx % 1 == 0:
+                            real_a_sess = np.squeeze(real_a_sess)
+                            x_png = Image.fromarray(real_a_sess.astype(np.uint8))
+                            x_png.save('{}/{}_0_img.png'.format(dataset_parser.logs_image_val_dir,
+                                                                real_a_name_sess[0].decode()), format='PNG')
+                            x_png = Image.fromarray(segment_a_np.astype(np.uint8))
+                            x_png.save('{}/{}_1_pred.png'.format(dataset_parser.logs_image_val_dir,
+                                                                 real_a_name_sess[0].decode()), format='PNG')
+                            x_png = Image.fromarray(binary_a.astype(np.uint8))
+                            x_png.save('{}/{}_2_binary.png'.format(dataset_parser.logs_image_val_dir,
+                                                                   real_a_name_sess[0].decode()), format='PNG')
+                            fake_b_sess = np.squeeze(fake_b_sess)
+                            x_png = Image.fromarray(fake_b_sess.astype(np.uint8))
+                            x_png.save('{}/{}_3_fake.png'.format(dataset_parser.logs_image_val_dir,
+                                                                 real_a_name_sess[0].decode()), format='PNG')
+                            real_b_sess = np.squeeze(real_b_sess)
+                            x_png = Image.fromarray(real_b_sess.astype(np.uint8))
+                            x_png.save('{}/{}_4_gt.png'.format(dataset_parser.logs_image_val_dir,
+                                                               real_a_name_sess[0].decode()), format='PNG')
 
                         print(image_idx)
                         image_idx += 1

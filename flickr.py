@@ -1,6 +1,7 @@
 import flickrapi
 import requests
 import os
+import time
 
 
 def filter_and_download(flickr, search_tags, per_page_max, pages, url_size, save_dir):
@@ -21,10 +22,19 @@ def filter_and_download(flickr, search_tags, per_page_max, pages, url_size, save
                 photo_url = photo.attrib[url_size]
             except KeyError:
                 continue
+
             # photo_tags = photo.attrib['tags']
             photo_id = photo.attrib['id']
             # r = requests.get(photo_url, verify=False)
-            r = requests.get(photo_url)
+            try:
+                r = requests.get(photo_url)
+            except requests.exceptions.ConnectionError:
+                print("Connection refused by the server..")
+                print("Let me sleep for 5 seconds")
+                print("ZZzzzz...")
+                time.sleep(5)
+                print("Was a nice sleep, now let me continue...")
+                continue
             with open('{}/{}.jpg'.format(save_dir, photo_id), "wb") as code:
                 code.write(r.content)
 
@@ -51,12 +61,12 @@ def main():
     api_key = '0eab67de128c5d4a1260c0443e56ec5e'
     user_id = '38d031ba85e71c58'
 
-    class_style = 'filter'
-    class_name = 'bird'
+    class_style = 'all'
+    class_name = 'dof'
     # Url size https://www.flickr.com/services/api/misc.urls.html
     url_size = 'url_n'
     # Max size: pages_max * per_page_max
-    pages_max = 1
+    pages_max = 4
     per_page_max = 500  # max: 500
     save_dir = 'flickr/{}_{}'.format(class_style, class_name)
 
@@ -66,7 +76,8 @@ def main():
     """
     A
     """
-    search_tags = '{} ,-black background, close up'.format(class_name)
+    # search_tags = '{} ,-black background, close up'.format(class_name)
+    search_tags = 'depth of field'
     save_dir_cur = os.path.join(save_dir, class_style)
     search_and_download(flickr=flickr, search_tags=search_tags, per_page_max=per_page_max,
                         pages_max=pages_max, url_size=url_size, save_dir=save_dir_cur)
@@ -74,8 +85,8 @@ def main():
     """
     B
     """
-    if True:
-        search_tags = '{} ,black background, -dof'.format(class_name)
+    if False:
+        search_tags = '{} ,depth of field'.format(class_name)
         save_dir_cur = os.path.join(save_dir, 'target')
         search_and_download(flickr=flickr, search_tags=search_tags, per_page_max=per_page_max,
                             pages_max=pages_max, url_size=url_size, save_dir=save_dir_cur)
